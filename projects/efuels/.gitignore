@@ -1,0 +1,15 @@
+__pycache__/
+*.pyc
+.venv/
+.env
+.doit.db
+.cache/
+ispypsa_runs/
+data/2024-isp-inputs-and-assumptions-workbook.xlsx
+data/trace_data/
+data/workbook_table_cache/
+*.nc
+*.parquet
+*.png
+!docs/*.png
+!chart_*.png

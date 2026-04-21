@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "whyalla-pypsa"
+version = "0.1.0"
+description = "Shared facility-network core for whyalla-dri-eaf and whyalla-efuels techno-economic analysis"
+requires-python = ">=3.11"
+dependencies = [
+    "pypsa>=0.28",
+    "pandas>=2.0",
+    "numpy>=1.25",
+    "xarray<2026",
+    "pyyaml",
+    "openpyxl",
+    "joblib",
+    "highspy",
+]
+
+[project.optional-dependencies]
+dev = ["pytest"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-dir]
+"" = "src"

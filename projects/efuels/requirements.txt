@@ -1,0 +1,10 @@
+-e ../..
+pypsa>=0.28
+pandas>=2.0
+numpy>=1.25
+xarray<2026
+pyyaml
+joblib
+highspy
+matplotlib
+pytest
