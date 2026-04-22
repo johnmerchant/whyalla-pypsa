@@ -29,31 +29,29 @@ capex is annuitised post-solve via a component-specific WACC overlay.
 ## Install
 
 ```
-python -m venv .venv && source .venv/bin/activate
-
 # core
-pip install -e .
+uv sync
 
 # per-project deps (core is pulled in as -e ../..)
-pip install -r projects/dri-eaf/requirements.txt
-pip install -r projects/efuels/requirements.txt
+uv pip install -r projects/dri-eaf/requirements.txt
+uv pip install -r projects/efuels/requirements.txt
 ```
 
 ## Run
 
 ```
 # single scenario
-cd projects/dri-eaf && python run.py
-cd projects/efuels && python run.py
+cd projects/dri-eaf && uv run python run.py
+cd projects/efuels && uv run python run.py
 
 # parametric sweeps
-python sweep_example.py
+uv run python sweep_example.py
 ```
 
 ## Test
 
 ```
-scripts/test-all.sh
+uv run scripts/test-all.sh
 ```
 
 Each project uses a flat module layout (e.g. `process_chain.py` at its root),
