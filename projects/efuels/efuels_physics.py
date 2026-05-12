@@ -19,8 +19,11 @@ H2_LHV_MWH_PER_T = 33.333
 # Note: overall power-to-MeOH LHV is ~0.45 (OVERALL_POWER_TO_MEOH_LHV)
 # after synthesis losses and parasitic loads — see Kassø benchmark in RESEARCH.md.
 ELECTROLYSER_EFFICIENCY = 0.70
-ELECTROLYSER_LIFE_YR = 20
-H2_STORAGE_LIFE_YR = 25
+# Lifetimes pulled from whyalla_pypsa.assumptions for cross-project consistency.
+from whyalla_pypsa.assumptions import (  # noqa: E402
+    ELECTROLYSER_LIFE_YEARS as ELECTROLYSER_LIFE_YR,
+    H2_STORE_LIFE_YEARS as H2_STORAGE_LIFE_YR,
+)
 
 # ── Methanol ───────────────────────────────────────────────────────────────
 # LHV of methanol (CH₃OH): 19.9 MJ/kg = 5.528 MWh/t

@@ -63,7 +63,10 @@ def main(
         if "h2_store" in n.stores.index:
             n.stores.at["h2_store", "e_nom_max"] = h2_hours * AVG_H2_MW
 
-        status, _ = n.optimize(solver_name=cfg.solver)
+        status, _ = n.optimize(
+            solver_name=cfg.solver,
+            extra_functionality=getattr(n, "_dri_shaft_constraint", None),
+        )
         elapsed = time.perf_counter() - t0
 
         if status not in ("ok", "optimal"):

@@ -22,13 +22,16 @@ scenario year taken from trajectory.csv. Prior-year build-out is locked in
 (you cannot "unbuild" an electrolyser or a storage tank), and policy/capex
 parameters match the trajectory row for that year.
 
-Two contrasting weeks are rendered per scenario year:
+Two contrasting weeks are rendered per scenario year, **independently per year**
+(calendar dates differ — the dispatch response matters, not aligned dates):
 
-  - "clean-energy week" — a sunny, windy stretch the storage build-out is
-    designed for. Picked to maximise (late-year H2 share − early-year H2 share).
+  - "clean-energy week" — a sunny, windy stretch this year's fleet exploits
+    best. Picked as the week of highest H2 feedstock share (or, in gas-only
+    years before the electrolyser is online, the week of lowest mean spot price).
   - "dunkelflaute" — a still, cloudy stretch where wind and solar fall short.
-    Picked to minimise the H2 share in the most-mature scenario year so the
-    reader can see gas stepping in as the reliability backstop.
+    Picked as the week of lowest H2 feedstock share (or, in gas-only years,
+    the week of highest mean spot price), so the reader can see gas covering
+    for H2 when renewable supply runs thin.
 
 Solved networks are cached to netcdf under `.dispatch_cache/` so re-running
 to tweak terminology or styling is instant (no re-solve).
@@ -53,9 +56,17 @@ from run import default_config
 from process_chain import attach_dri_eaf
 from generate_trajectory import (
     ISP_SCENARIOS,
+    ISP_NAMES,
     NG_INTENSITY_MWH_PER_T_DRI,
     CO2_INTENSITY_KG_PER_T_DRI,
     FURNACE_OPEN_YEAR,
+    GAS_DEAL_VOLUME_PJ_PER_YR,
+    GAS_DEAL_LAST_YEAR,
+    GAS_SPOT_PRICE_PER_GJ,
+    SCRAP_TIER1_CAPACITY_T_PER_YR,
+    SCRAP_TIER1_PRICE_PER_T,
+    SCRAP_TIER2_CAPACITY_T_PER_YR,
+    SCRAP_TIER2_PRICE_PER_T,
 )
 
 HERE = Path(__file__).parent
@@ -77,7 +88,22 @@ ELY_ANCHOR_MW = 50.0
 WEEK_LABELS = {
     "transition": "clean-energy week — sunny, windy stretch",
     "dunkelflaute": "dunkelflaute — still, cloudy stretch where gas covers for H$_2$",
+    "first_net_zero": (
+        "milestone week — the first 7 days of net-zero-carbon steel "
+        "(Scope 1 gas emissions offset by Scope 2 grid-export displacement)"
+    ),
+    "first_carbon_free_fallback": (
+        "milestone week — the first 7 days at ≥90% hydrogen feedstock"
+    ),
 }
+
+# H2 feedstock share (fraction) fallback threshold when net-zero is unreachable.
+CARBON_FREE_FALLBACK_THRESHOLD = 0.90
+
+# SA grid average emission intensity (t CO2 / MWh) for Scope 2 market-based
+# accounting. Exports displace thermal generation at roughly this intensity;
+# imports cause it. ~0.55 matches SA's current gas-dominated thermal mix.
+SA_GRID_CO2_INTENSITY_T_PER_MWH = 0.55
 
 
 def isp_human(isp: str) -> str:
@@ -94,22 +120,37 @@ def _scenario_label(year: int, row: pd.Series) -> str:
     h2_pct = float(row.h2_fraction) * 100.0
     if ely < ELY_ANCHOR_MW:
         return (
-            f"{year} — gas-only phase (before the hydrogen furnace opens; "
+            f"FY{year} — gas-only phase (before the hydrogen furnace opens; "
             f"the electric arc furnace is Whyalla's only flexible load)"
         )
     return (
-        f"{year} — {h2_pct:.0f}% hydrogen over the year  |  "
+        f"FY{year} — {h2_pct:.0f}% hydrogen over the year  |  "
         f"{ely:.0f} MW of electrolysers, {store / 1000:.1f} GWh of hydrogen storage"
     )
 
 
-def _prior_build(traj: pd.DataFrame, year: int) -> tuple[float, float]:
-    """Cumulative (electrolyser_mw, h2_storage_mwh) built in years strictly before `year`."""
+def _prior_build(traj: pd.DataFrame, year: int) -> dict[str, float]:
+    """Cumulative capacities built in years strictly before `year`.
+
+    Keys: electrolyser_mw, h2_storage_mwh, electric_heater_mw, h2_burner_mw.
+    Heat-component columns are tolerant of older trajectory CSVs that predate
+    the heat_duty bus (missing columns default to 0).
+    """
     prior = traj[traj.year < year]
     if prior.empty:
-        return 0.0, 0.0
+        return {
+            "electrolyser_mw": 0.0,
+            "h2_storage_mwh": 0.0,
+            "electric_heater_mw": 0.0,
+            "h2_burner_mw": 0.0,
+        }
     last = prior.iloc[-1]
-    return float(last.electrolyser_mw), float(last.h2_storage_mwh)
+    return {
+        "electrolyser_mw": float(last.electrolyser_mw),
+        "h2_storage_mwh": float(last.h2_storage_mwh),
+        "electric_heater_mw": float(last.get("electric_heater_mw", 0.0) or 0.0),
+        "h2_burner_mw": float(last.get("h2_burner_mw", 0.0) or 0.0),
+    }
 
 
 def _cache_path(year: int, policy: str, isp: str, traj_row: pd.Series) -> Path:
@@ -124,6 +165,17 @@ def _cache_path(year: int, policy: str, isp: str, traj_row: pd.Series) -> Path:
         "wacc": round(float(traj_row.discount_rate), 4),
         "prior_ely": round(float(traj_row.get("_prior_ely", 0.0)), 3),
         "prior_store": round(float(traj_row.get("_prior_store", 0.0)), 3),
+        "prior_eh": round(float(traj_row.get("_prior_eh", 0.0)), 3),
+        "prior_hb": round(float(traj_row.get("_prior_hb", 0.0)), 3),
+        # Bump on any model-topology change so prior caches invalidate.
+        # Changelog:
+        #   v2 — carbon price flows into SA thermal generators' marginal cost
+        #   v3 — phase model: pre-2030 DRI off, EAF scrap (cap 30% from 2030)
+        #   v4 — thermal buffer dropped (heat balances per snapshot)
+        #   v5 — EAF off-gas waste-heat-to-DRI pathway removed
+        #   v6 — Santos foundation contract: deal-gas volume cap +
+        #        spot-gas tier above the cap; deal expires after 2040
+        "model_version": 6,
     }, sort_keys=True)
     digest = hashlib.md5(key_blob.encode()).hexdigest()[:10]
     return CACHE_DIR / f"dispatch_{year}_{digest}.nc"
@@ -132,14 +184,18 @@ def _cache_path(year: int, policy: str, isp: str, traj_row: pd.Series) -> Path:
 def solve_scenario(
     year: int,
     traj_row: pd.Series,
-    prior_ely: float,
-    prior_store: float,
+    prior: dict[str, float],
     *,
     policy: str = POLICY,
     isp: str = ISP,
     use_cache: bool = True,
 ):
     """Build + solve a single full-year sa_dispatch scenario from a trajectory row.
+
+    `prior` is the dict returned by `_prior_build(...)`, carrying cumulative
+    capacities (electrolyser, h2 store, electric heater, h2 burner, thermal
+    buffer) built in years strictly before this one. Those become p_nom_min /
+    e_nom_min floors so the solver can upgrade but not un-build.
 
     Result is cached to netcdf so re-runs (for terminology / styling edits)
     skip the ~5-10 min HiGHS solve.
@@ -150,8 +206,10 @@ def solve_scenario(
     wacc_new = float(traj_row.discount_rate)
 
     cache_row = traj_row.copy()
-    cache_row["_prior_ely"] = prior_ely
-    cache_row["_prior_store"] = prior_store
+    cache_row["_prior_ely"] = prior["electrolyser_mw"]
+    cache_row["_prior_store"] = prior["h2_storage_mwh"]
+    cache_row["_prior_eh"] = prior["electric_heater_mw"]
+    cache_row["_prior_hb"] = prior["h2_burner_mw"]
     cache = _cache_path(year, policy, isp, cache_row)
     if use_cache and cache.exists():
         cfg = default_config(
@@ -159,6 +217,7 @@ def solve_scenario(
         )
         cfg = copy.deepcopy(cfg)
         cfg.scenario.file_token = ISP_SCENARIOS[isp]
+        cfg.scenario.name = ISP_NAMES[isp]
         cfg.pypsa_wacc = 0.09
         n = pypsa.Network(str(cache))
         print(f"  [cache hit] loaded {cache.name}", flush=True)
@@ -169,10 +228,17 @@ def solve_scenario(
     )
     cfg = copy.deepcopy(cfg)
     cfg.scenario.file_token = ISP_SCENARIOS[isp]
+    cfg.scenario.name = ISP_NAMES[isp]
     cfg.pypsa_wacc = 0.09  # NOAK for facility base
 
     n = build_facility_network(cfg)
-    attach_grid_price(n, cfg)
+    attach_grid_price(n, cfg, carbon_price_per_t_co2=carbon_p)
+    # Phase model: pre-2030 = EAF scrap-only (cap=100%); from 2030 = 30% cap.
+    scrap_cap_this_year = 1.0 if year < FURNACE_OPEN_YEAR else 0.30
+    # Match generate_trajectory.solve_year: deal-gas tier (capped to
+    # GAS_DEAL_VOLUME_PJ_PER_YR) until the contract expires; spot-gas tier
+    # (uncapped, GAS_SPOT_PRICE_PER_GJ) thereafter.
+    gas_volume_pj = GAS_DEAL_VOLUME_PJ_PER_YR if year <= GAS_DEAL_LAST_YEAR else None
     attach_dri_eaf(
         n,
         electrolyser_capex_per_kw=ely_capex,
@@ -180,22 +246,44 @@ def solve_scenario(
         dual_fuel=True,
         ng_intensity_mwh_per_t_dri=NG_INTENSITY_MWH_PER_T_DRI,
         ng_price_per_gj=gas_p,
+        ng_annual_volume_pj=gas_volume_pj,
+        ng_spot_price_per_gj=GAS_SPOT_PRICE_PER_GJ,
         co2_intensity_kg_per_t_dri=CO2_INTENSITY_KG_PER_T_DRI,
         carbon_price_per_t_co2=carbon_p,
+        enable_scrap=True,
+        scrap_tier1_capacity_t_per_yr=SCRAP_TIER1_CAPACITY_T_PER_YR,
+        scrap_tier1_price_per_t=SCRAP_TIER1_PRICE_PER_T,
+        scrap_tier2_capacity_t_per_yr=SCRAP_TIER2_CAPACITY_T_PER_YR,
+        scrap_tier2_price_per_t=SCRAP_TIER2_PRICE_PER_T,
+        scrap_max_share=scrap_cap_this_year,
     )
 
-    # Match trajectory structural constraints.
+    # Match trajectory structural constraints. Pre-2030 = no DRI at all; the
+    # EAF runs on scrap-only. DRI shaft (both H2 and NG paths) must be zeroed
+    # so the closure reads shaft_cap_out=0.
     if year < FURNACE_OPEN_YEAR:
         n.links.at["electrolyser", "p_nom_max"] = 0.0
-        n.links.at["dri_plant", "p_min_pu"] = 0.0
-    n.links.at["electrolyser", "p_nom_min"] = prior_ely
+        n.links.at["dri_plant", "p_nom_max"] = 0.0
+        n.links.at["dri_plant", "p_nom"] = 0.0
+        if "dri_plant_gas" in n.links.index:
+            n.links.at["dri_plant_gas", "p_max_pu"] = 0.0
+    n.links.at["electrolyser", "p_nom_min"] = prior["electrolyser_mw"]
     if "h2_store" in n.stores.index:
-        n.stores.at["h2_store", "e_nom_min"] = prior_store
+        n.stores.at["h2_store", "e_nom_min"] = prior["h2_storage_mwh"]
+    # Heat-system irreversibility — mirror generate_trajectory.solve_year.
+    if "electric_heater" in n.links.index:
+        n.links.at["electric_heater", "p_nom_min"] = prior["electric_heater_mw"]
+    if "h2_burner" in n.links.index:
+        n.links.at["h2_burner", "p_nom_min"] = prior["h2_burner_mw"]
 
     solver_opts = dict(cfg.solver_options)
     solver_opts["run_crossover"] = "off"
     solver_opts["threads"] = 2
-    status, _ = n.optimize(solver_name=cfg.solver, solver_options=solver_opts)
+    status, _ = n.optimize(
+        solver_name=cfg.solver,
+        solver_options=solver_opts,
+        extra_functionality=getattr(n, "_dri_shaft_constraint", None),
+    )
     if status not in ("ok", "optimal"):
         raise RuntimeError(f"Solve failed for year {year}: {status}")
 
@@ -238,102 +326,133 @@ def _weekly_h2_share(n) -> pd.Series:
     return share.dropna()
 
 
-def _calendar_key(ts) -> str:
-    return f"{ts.month:02d}-{ts.day:02d}-{ts.hour:02d}"
-
-
-def _ts_by_key(n, key: str):
-    """Return the first snapshot in n matching month-day-hour key."""
+def _weekly_vre_share(n) -> pd.Series:
+    """Rolling 7-day VRE (wind+solar) share of SA generation, window-start index."""
+    gens = n.generators_t.p
     snaps = n.snapshots
-    month, day, hour = (int(p) for p in key.split("-"))
-    hit = snaps[
-        (snaps.month == month) & (snaps.day == day) & (snaps.hour == hour)
-    ]
-    if len(hit):
-        return hit[0]
-    # Fall back: closest same-day match, or just the first snapshot.
-    fallback = snaps[(snaps.month == month) & (snaps.day == day)]
-    return fallback[0] if len(fallback) else snaps[0]
+    wind = _sum_series(gens, ["NSA_wind", "CSA_wind", "SESA_wind"], snaps)
+    solar = _sum_series(gens, ["NSA_solar", "CSA_solar", "SESA_solar"], snaps)
+    thermal = _sum_series(gens, ["NSA_thermal", "CSA_thermal", "SESA_thermal"], snaps)
+    vre = wind + solar
+    num = vre.rolling(168, min_periods=168).sum().shift(-167)
+    den = (vre + thermal).rolling(168, min_periods=168).sum().shift(-167).replace(0.0, np.nan)
+    return (num / den).dropna()
 
 
-def _keyed_weekly_df(s: pd.Series) -> pd.DataFrame:
-    return pd.DataFrame({
-        "ts": s.index,
-        "key": [_calendar_key(t) for t in s.index],
-        "h2_share": s.values,
-    })
+def _has_h2_dispatch(n) -> bool:
+    """True iff the electrolyser / DRI is actually producing H2 (not LP noise)."""
+    h2, gas = _feedstock_series(n)
+    total = float(h2.sum()) + float(gas.sum())
+    if total <= 0:
+        return False
+    return float(h2.sum()) / total > 0.01  # at least 1% annual H2 share
 
 
-def _anchor_years(
-    networks: dict[int, "pypsa.Network"], capacities: dict[int, float]
-) -> tuple[int | None, int | None]:
-    """(earliest, latest) year with electrolyser p_nom_opt > ELY_ANCHOR_MW."""
-    eligible = sorted(y for y, mw in capacities.items() if mw > ELY_ANCHOR_MW)
-    if len(eligible) < 2:
-        return (eligible[0] if eligible else None), (eligible[0] if eligible else None)
-    return eligible[0], eligible[-1]
+def pick_transition_week_for(n, cfg) -> pd.Timestamp:
+    """Best clean-energy week for this year's own dispatch.
 
-
-def pick_transition_week(
-    networks: dict[int, "pypsa.Network"], capacities: dict[int, float]
-) -> tuple[str, dict[int, pd.Timestamp]] | None:
-    """Calendar week maximising (late-year H2 share − early-year H2 share).
-
-    Returns (calendar_key, {year: week_start_ts}) or None if only one (or zero)
-    scenario years actually built electrolyser capacity.
+    If H2 is flowing to DRI: argmax of rolling 7-day H2 feedstock share.
+    Otherwise (gas-only era): argmax of rolling 7-day VRE share of SA supply.
     """
-    early, late = _anchor_years(networks, capacities)
-    if early is None or late is None or early == late:
-        return None
-
-    share_early = _keyed_weekly_df(_weekly_h2_share(networks[early]))
-    share_late = _keyed_weekly_df(_weekly_h2_share(networks[late]))
-    merged = share_early.rename(columns={"ts": "ts_e", "h2_share": "h2_e"}).merge(
-        share_late.rename(columns={"ts": "ts_l", "h2_share": "h2_l"}), on="key"
-    )
-    merged["delta"] = merged["h2_l"] - merged["h2_e"]
-    viable = merged[(merged["h2_e"] > 0.4) & (merged["h2_l"] > 0.4)]
-    pool = viable if not viable.empty else merged
-    best = pool.sort_values("delta", ascending=False).iloc[0]
-
-    print(
-        f"\n[transition] {best['key']}: "
-        f"{early} H2={best['h2_e']:.1%}  →  {late} H2={best['h2_l']:.1%}  "
-        f"(Δ={best['delta']:+.1%})",
-        flush=True,
-    )
-
-    ts_by_year = {y: _ts_by_key(networks[y], best["key"]) for y in networks}
-    return best["key"], ts_by_year
+    if _has_h2_dispatch(n):
+        return _weekly_h2_share(n).idxmax()
+    return _weekly_vre_share(n).idxmax()
 
 
-def pick_dunkelflaute_week(
-    networks: dict[int, "pypsa.Network"], capacities: dict[int, float]
-) -> tuple[str, dict[int, pd.Timestamp]] | None:
-    """Calendar week minimising H2 share in the latest-built scenario.
+def pick_dunkelflaute_week_for(n, cfg) -> pd.Timestamp:
+    """Worst VRE-stressed week for this year's own dispatch.
 
-    Gas backs up H2 when VRE + storage fall short. We locate that in the most
-    mature build year (highest electrolyser capacity), then pin the same
-    calendar week on every other scenario so the chart compares like-for-like.
+    If H2 is flowing: argmin of rolling 7-day H2 share (gas covering for H2).
+    Otherwise: argmin of rolling 7-day VRE share of SA supply.
     """
-    eligible = sorted(y for y, mw in capacities.items() if mw > ELY_ANCHOR_MW)
-    if not eligible:
-        return None
-    anchor = eligible[-1]
+    if _has_h2_dispatch(n):
+        return _weekly_h2_share(n).idxmin()
+    return _weekly_vre_share(n).idxmin()
 
-    share_anchor = _keyed_weekly_df(_weekly_h2_share(networks[anchor]))
-    # Lowest H2 share = highest gas share = reliability stress.
-    worst = share_anchor.sort_values("h2_share", ascending=True).iloc[0]
 
-    print(
-        f"\n[dunkelflaute] {worst['key']}: "
-        f"{anchor} H2 share={worst['h2_share']:.1%} "
-        f"(gas share={1.0 - worst['h2_share']:.1%}) — most stressed week",
-        flush=True,
+def _facility_net_import(n) -> pd.Series:
+    """Net facility grid draw (MW per snapshot): positive=import, negative=export."""
+    snaps = n.snapshots
+    imp = (
+        n.links_t.p0["grid_import"]
+        if "grid_import" in n.links.index
+        else pd.Series(0.0, index=snaps)
     )
+    exp = (
+        n.links_t.p0["grid_export"]
+        if "grid_export" in n.links.index
+        else pd.Series(0.0, index=snaps)
+    )
+    return imp - exp
 
-    ts_by_year = {y: _ts_by_key(networks[y], worst["key"]) for y in networks}
-    return worst["key"], ts_by_year
+
+def _hourly_net_emissions(
+    n, grid_intensity: float = SA_GRID_CO2_INTENSITY_T_PER_MWH,
+) -> pd.Series:
+    """Scope 1 + market-based Scope 2 emissions per snapshot (t CO2 / h).
+
+    Scope 1: fossil NG burned in the DRI shaft (dri_plant_gas p0 minus the
+    biomethane share, × NG CO2 factor). Biomethane is biogenic (NGER scope 1
+    zero) so does not enter Scope 1.
+    Scope 2: net facility grid draw × SA grid CO2 intensity. Exports credit the
+    same intensity (market-based displacement), so a net-negative hour means
+    the facility is sinking more carbon than it emits.
+    """
+    snaps = n.snapshots
+    gas = (
+        n.links_t.p0["dri_plant_gas"]
+        if "dri_plant_gas" in n.links.index
+        else pd.Series(0.0, index=snaps)
+    )
+    biomethane = (
+        n.generators_t.p["biomethane_supply"]
+        if "biomethane_supply" in n.generators.index
+        else pd.Series(0.0, index=snaps)
+    )
+    fossil = (gas - biomethane).clip(lower=0)
+    # NG emission factor: kg CO2 per MWh_NG = CO2/tDRI ÷ MWh_NG/tDRI.
+    ng_factor_t_per_mwh = (
+        CO2_INTENSITY_KG_PER_T_DRI / NG_INTENSITY_MWH_PER_T_DRI / 1000.0
+    )
+    scope1 = fossil * ng_factor_t_per_mwh
+    scope2 = _facility_net_import(n) * grid_intensity
+    return scope1 + scope2
+
+
+def _weekly_net_emissions(n) -> pd.Series:
+    """Rolling 7-day net Scope 1+2 emissions (t CO2), window-start indexed."""
+    hourly = _hourly_net_emissions(n)
+    return hourly.rolling(168, min_periods=168).sum().shift(-167).dropna()
+
+
+def pick_first_net_zero_week(
+    solved: dict[int, tuple], years: list[int],
+    fallback_threshold: float = CARBON_FREE_FALLBACK_THRESHOLD,
+) -> tuple[int, pd.Timestamp, str] | None:
+    """Earliest week where net Scope 1+2 emissions over 7 rolling days ≤ 0.
+
+    If no scenario year achieves net-zero, fall back to the first week where
+    rolling 7-day H2 feedstock share ≥ fallback_threshold (default 90%).
+    Returns (year, week_start, kind) with kind ∈ {"first_net_zero",
+    "first_carbon_free_fallback"}, or None if neither condition is met anywhere.
+    """
+    for year in sorted(years):
+        n, _, _ = solved[year]
+        if not _has_h2_dispatch(n):
+            continue
+        weekly = _weekly_net_emissions(n)
+        hits = weekly[weekly <= 0]
+        if not hits.empty:
+            return year, hits.index[0], "first_net_zero"
+    for year in sorted(years):
+        n, _, _ = solved[year]
+        if not _has_h2_dispatch(n):
+            continue
+        share = _weekly_h2_share(n)
+        hits = share[share >= fallback_threshold]
+        if not hits.empty:
+            return year, hits.index[0], "first_carbon_free_fallback"
+    return None
 
 
 def extract_window(n, cfg, week_start: pd.Timestamp):
@@ -368,20 +487,36 @@ def extract_window(n, cfg, week_start: pd.Timestamp):
     # EAF: p2 carries AC draw (positive) because efficiency2 < 0.
     eaf_p2 = n.links_t.p2["eaf"].loc[idx] if "eaf" in n.links.index else pd.Series(0.0, index=idx)
     eaf = eaf_p2.clip(lower=0)
+    # Electric resistance heater on shaft thermal bus — major load in no-gas branch.
+    eh = (
+        n.links_t.p0["electric_heater"].loc[idx]
+        if "electric_heater" in n.links.index
+        else pd.Series(0.0, index=idx)
+    )
 
     # DRI feedstock mix: both p0 values are MWh of thermal fuel (H2 / NG).
+    # Gas flow on dri_plant_gas is the sum of fossil NG + biomethane (both feed
+    # the `ng` bus). Pull biomethane share separately for chart layering.
     h2_to_dri = n.links_t.p0["dri_plant"].loc[idx] if "dri_plant" in n.links.index else pd.Series(0.0, index=idx)
     gas_to_dri = (
         n.links_t.p0["dri_plant_gas"].loc[idx]
         if "dri_plant_gas" in n.links.index
         else pd.Series(0.0, index=idx)
     )
+    biomethane_to_dri = (
+        n.generators_t.p["biomethane_supply"].loc[idx]
+        if "biomethane_supply" in n.generators.index
+        else pd.Series(0.0, index=idx)
+    )
+    fossil_ng_to_dri = (gas_to_dri - biomethane_to_dri).clip(lower=0)
 
     # CSA spot price on facility's attached subregion bus.
     sub_bus = f"{cfg.grid.subregion}_ac"
     sub_price = n.buses_t.marginal_price[sub_bus].loc[idx]
 
     return dict(
+        biomethane_to_dri=biomethane_to_dri,
+        fossil_ng_to_dri=fossil_ng_to_dri,
         idx=idx,
         wind=wind,
         solar=solar,
@@ -390,6 +525,7 @@ def extract_window(n, cfg, week_start: pd.Timestamp):
         price=sub_price.clip(lower=-200, upper=800),
         ely=ely,
         eaf=eaf,
+        eh=eh,
         base_load=base_load,
         gas_to_dri=gas_to_dri,
         h2_to_dri=h2_to_dri,
@@ -445,6 +581,7 @@ def make_chart(data, label: str, week_kind: str, out_path):
 
     eaf_vals = data["eaf"].values
     ely_vals = data["ely"].values
+    eh_vals = data["eh"].values
     ax_top.fill_between(
         idx, 0, -eaf_vals, color="#6a51a3",
         alpha=0.85, label="Whyalla electric arc furnace", linewidth=0,
@@ -454,9 +591,14 @@ def make_chart(data, label: str, week_kind: str, out_path):
         color="#2c7fb8", alpha=0.85,
         label="Whyalla hydrogen electrolysers", linewidth=0,
     )
+    ax_top.fill_between(
+        idx, -eaf_vals - ely_vals, -eaf_vals - ely_vals - eh_vals,
+        color="#e07b00", alpha=0.85,
+        label="Whyalla shaft electric heater", linewidth=0,
+    )
 
     supply_max = float(cum_supply.max()) if cum_supply.size else 0.0
-    flex_max = float((ely_vals + eaf_vals).max()) if n_pts else 0.0
+    flex_max = float((ely_vals + eaf_vals + eh_vals).max()) if n_pts else 0.0
     ax_top.set_ylim(
         -flex_max * 1.25 - 100,
         max(supply_max, float(data["base_load"].max()) if n_pts else 0.0) * 1.05,
@@ -487,18 +629,23 @@ def make_chart(data, label: str, week_kind: str, out_path):
         float(price_vals.max()) * 1.15 + 20,
     )
 
-    # ── Panel 2: DRI feedstock mix (gas vs H2) ────────────────────────────────
-    gas_mw = data["gas_to_dri"].values
+    # ── Panel 2: DRI feedstock mix (fossil NG vs biomethane vs H2) ───────────
+    fossil_mw = data["fossil_ng_to_dri"].values
+    bm_mw = data["biomethane_to_dri"].values
     h2_mw = data["h2_to_dri"].values
-    total_mw = gas_mw + h2_mw
+    total_mw = fossil_mw + bm_mw + h2_mw
     mix_max = max(total_mw.max(), 1.0) * 1.12
 
     ax_mix.fill_between(
-        idx, 0, gas_mw, color="#b15928", alpha=0.85,
-        label="Natural gas", linewidth=0,
+        idx, 0, fossil_mw, color="#b15928", alpha=0.85,
+        label="Natural gas (fossil)", linewidth=0,
     )
     ax_mix.fill_between(
-        idx, gas_mw, gas_mw + h2_mw, color="#2c7fb8",
+        idx, fossil_mw, fossil_mw + bm_mw, color="#27ae60", alpha=0.85,
+        label="Biomethane (RGGO)", linewidth=0,
+    )
+    ax_mix.fill_between(
+        idx, fossil_mw + bm_mw, fossil_mw + bm_mw + h2_mw, color="#2c7fb8",
         alpha=0.85, label="Hydrogen (from electrolysers + tanks)", linewidth=0,
     )
     ax_mix.set_ylim(0, mix_max)
@@ -507,18 +654,22 @@ def make_chart(data, label: str, week_kind: str, out_path):
         fontsize=9.5,
     )
     ax_mix.grid(alpha=0.25)
-    ax_mix.legend(fontsize=8, loc="upper left", ncol=2)
+    ax_mix.legend(fontsize=8, loc="upper left", ncol=3)
     ax_mix.xaxis.set_major_locator(mdates.DayLocator())
     ax_mix.xaxis.set_major_formatter(mdates.DateFormatter("%a %d %b"))
 
-    gas_total = gas_mw.sum()
+    fossil_total = fossil_mw.sum()
+    bm_total = bm_mw.sum()
     h2_total = h2_mw.sum()
-    all_total = gas_total + h2_total
+    all_total = fossil_total + bm_total + h2_total
+    fossil_share = 100 * fossil_total / all_total if all_total > 0 else 0.0
+    bm_share = 100 * bm_total / all_total if all_total > 0 else 0.0
     h2_share = 100 * h2_total / all_total if all_total > 0 else 0.0
+    bm_str = f"  ·  {bm_share:.1f}% biomethane" if bm_total > 0 else ""
     ax_mix.text(
         0.995, 0.90,
         f"This week's furnace fuel: "
-        f"{100 - h2_share:.1f}% natural gas  ·  {h2_share:.1f}% hydrogen",
+        f"{fossil_share:.1f}% fossil gas{bm_str}  ·  {h2_share:.1f}% hydrogen",
         transform=ax_mix.transAxes, ha="right", va="top",
         fontsize=10.5, fontweight="bold", color="#0a4a7a",
         bbox=dict(facecolor="white", alpha=0.85, edgecolor="#aaa", pad=3),
@@ -552,14 +703,17 @@ def main(years: list[int] | None = None, policy: str = POLICY, isp: str = ISP):
     capacities: dict[int, float] = {}
     for year in years:
         row = branch[branch.year == year].iloc[0]
-        prior_ely, prior_store = _prior_build(branch, year)
+        prior = _prior_build(branch, year)
         print(
             f"\n[{year}] solving: CAPEX=${row.capex_per_kw:.0f}/kW  gas=${row.gas_price:.1f}  "
             f"C=${row.carbon_price:.1f}/t  WACC={row.discount_rate:.2%}  "
-            f"prior_ely={prior_ely:.0f} MW  prior_store={prior_store:.0f} MWh",
+            f"prior_ely={prior['electrolyser_mw']:.0f} MW  "
+            f"prior_store={prior['h2_storage_mwh']:.0f} MWh  "
+            f"prior_eh={prior['electric_heater_mw']:.0f} MW  "
+            f"prior_hb={prior['h2_burner_mw']:.0f} MW",
             flush=True,
         )
-        n, cfg = solve_scenario(year, row, prior_ely, prior_store)
+        n, cfg = solve_scenario(year, row, prior)
         label = _scenario_label(year, row)
         ely_cap = (
             float(n.links.at["electrolyser", "p_nom_opt"])
@@ -570,22 +724,54 @@ def main(years: list[int] | None = None, policy: str = POLICY, isp: str = ISP):
         solved[year] = (n, cfg, label)
         print(f"  solved: ely={ely_cap:.0f} MW", flush=True)
 
-    networks = {y: solved[y][0] for y in years}
+    # ── Pick weeks independently per year (dispatch matters, not calendar dates) ─
+    week_picks: dict[str, dict[int, pd.Timestamp]] = {"transition": {}, "dunkelflaute": {}}
+    for year in years:
+        n, cfg, _ = solved[year]
+        tr = pick_transition_week_for(n, cfg)
+        df = pick_dunkelflaute_week_for(n, cfg)
+        week_picks["transition"][year] = tr
+        week_picks["dunkelflaute"][year] = df
+        basis = "H2 share" if _has_h2_dispatch(n) else "VRE share"
+        print(
+            f"[{year}] picks by {basis}: "
+            f"transition={tr:%d %b}  |  dunkelflaute={df:%d %b}",
+            flush=True,
+        )
 
-    # ── Pick weeks ────────────────────────────────────────────────────────────
-    week_picks: dict[str, dict[int, pd.Timestamp] | None] = {}
-    transition = pick_transition_week(networks, capacities)
-    week_picks["transition"] = transition[1] if transition else None
-
-    dunkelflaute = pick_dunkelflaute_week(networks, capacities)
-    week_picks["dunkelflaute"] = dunkelflaute[1] if dunkelflaute else None
+    # ── Milestone: first net-zero-carbon-steel week (Scope 1 + Scope 2) ─────
+    # Falls back to "first ≥90% hydrogen feedstock" week when the trajectory
+    # never gets below net-zero on a market-based basis.
+    milestone = pick_first_net_zero_week(solved, years)
+    if milestone is None:
+        print("\n[milestone] no net-zero or 90%-H2 week across solved years",
+              flush=True)
+    else:
+        m_year, m_week, m_kind = milestone
+        m_n, m_cfg, m_label = solved[m_year]
+        if m_kind == "first_net_zero":
+            weekly = _weekly_net_emissions(m_n)
+            week_net_t = float(weekly.loc[m_week])
+            print(
+                f"\n[milestone] first net-zero-carbon steel week: FY{m_year} — "
+                f"{m_week:%d %b %Y}  (net Scope 1+2 = {week_net_t:,.0f} t CO2/wk)",
+                flush=True,
+            )
+        else:
+            share = _weekly_h2_share(m_n)
+            week_h2 = float(share.loc[m_week]) * 100.0
+            print(
+                f"\n[milestone] net-zero unreachable; falling back to first "
+                f"≥90% H2 week: FY{m_year} — {m_week:%d %b %Y}  "
+                f"(week H2 share = {week_h2:.1f}%)",
+                flush=True,
+            )
+        data = extract_window(m_n, m_cfg, m_week)
+        out = HERE / f"chart_dispatch_{m_year}_{m_kind}.png"
+        make_chart(data, m_label, m_kind, out)
 
     # ── Render ────────────────────────────────────────────────────────────────
     for week_kind, ts_by_year in week_picks.items():
-        if ts_by_year is None:
-            print(f"\n[skip {week_kind}] not enough scenarios with electrolyser built",
-                  flush=True)
-            continue
         print(f"\n── Rendering {week_kind} week ───────────────────────────────",
               flush=True)
         for year in years:
@@ -595,6 +781,7 @@ def main(years: list[int] | None = None, policy: str = POLICY, isp: str = ISP):
             print(
                 f"  [{year} / {week_kind}] avg flex draw: "
                 f"ely={data['ely'].mean():.0f} MW  eaf={data['eaf'].mean():.0f} MW  "
+                f"eh={data['eh'].mean():.0f} MW  "
                 f"h2 share={data['h2_to_dri'].sum() / max(data['h2_to_dri'].sum() + data['gas_to_dri'].sum(), 1e-9):.1%}  "
                 f"mean price={data['price'].mean():.1f} $/MWh",
                 flush=True,

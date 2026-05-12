@@ -1,342 +1,563 @@
-# Whyalla e-Methanol & e-Fuels: A Breakeven Analysis
+# Whyalla Synthetic Fuels — A Sovereign Capability Investment Case
 
-A PyPSA + ISPyPSA-based technoeconomic model of a greenfield e-methanol
-and e-fuels refinery at Whyalla, anchored to the SA Northern REZ. Treats
-Whyalla as a chemical / liquid-fuels export precinct, leveraging the existing
-deepwater port and the same SA Northern REZ that hosts the adjacent
-steelworks.
+**Australia imports ~595 kbpd of jet and diesel — about 80% of total
+liquid-fuel demand. Two refineries remain (Lytton and Geelong), both
+on Federal life support (FSSP) extended through 2030. National
+stockholding sits below the IEA 90-day target. Every drop of fuel
+reaching Australian wheels, ships, jet engines, or ADF assets passes
+through one of two narrow sea-lanes (Hormuz, Malacca) which Q2 2026
+demonstrated are not benign.**
 
-> **Status: implemented.**  Physics, components, results extraction, the
-> CO₂ supply merit-order curve, the scenario matrix, and 6 chart scripts
-> are all complete and tested.  Run `python -m pytest` to verify.
-
-## Thesis
-
-The central question: **under what combination of electrolyser cost
-decline, CO₂ supply cost, cost of capital, and product-price policy
-(ReFuelEU Aviation, FuelEU Maritime, domestic SAF mandate, IMO 2050) does
-a greenfield e-methanol / synthetic-diesel facility at Whyalla clear
-commercial hurdle rates?**
-
-### Central-case plant sizing — GW-scale diesel-led
-
-The model is anchored to a **1 Mt/yr synthetic diesel** output
-(≈ 3 Mt/yr MeOH feedstock, ≈ 5–6 GW electrolyser at 50–55% capacity
-factor), derived from the MTO+MOGD pathway.  This anchor was chosen to
-match a realistic Queensland/SA deepwater port export precinct scale and
-to provide a direct comparison with VLSFO / diesel import-parity pricing.
-
-| Parameter | Value | Notes |
-| --- | ---: | --- |
-| `DEFAULT_MEOH_TONNES_PER_YEAR` | 3 000 000 t/yr | Model default |
-| `DEFAULT_DIESEL_TONNES_PER_YEAR` | 1 000 000 t/yr | MTO+MOGD from 3 Mt MeOH |
-| Electrolyser (model build-out) | 4 700–5 200 MW | LP-optimised at 50 AUD/MWh grid |
-| Import-parity diesel (2030) | 1 550 AUD/t | Revenue benchmark |
-| LCOF range (chart1 sweep) | 3 300–6 500 AUD/t | 2–4× import parity |
-
-The LCOF gap to import parity closes with IMO policy premiums (+400/t
-Tier-1, +800/t Tier-2) and electrolyser CAPEX decline below 800 AUD/kW.
-
-### Five interacting forces
-
-The answer is not a single breakeven point — it is a surface shaped by:
-
-1. **Electrolyser CAPEX decline** — BNEF central: 2 200 → 500 AUD/kW
-   (2026–2040); BNEF slow: 2 400 → 900; IEA NZE: 2 000 → 400.
-2. **CO₂ supply cost and availability** — five tranches from steelworks
-   DRI off-gas (80/t) through DAC (600→300/t declining); see §4 and
-   `co2_supply.py`.
-3. **Product price path** — import parity, IMO Tier-1 (+400/t from
-   2030), IMO Tier-2 (+800/t from 2033); see `trajectory_ispypsa.py`.
-4. **Cost of capital** — FOAK→NOAK step (13%→9% linear, 2030–2035)
-   dominates timing of first commercial tranche.
-5. **Buffer partition** — MeOH synthesis prefers steady state; the
-   optimiser pushes flexibility into the cheap MeOH tank farm, leaving
-   H₂ storage as the short-cycle fast buffer.
+This project models a domestic synthetic-fuels precinct at **Whyalla /
+Port Bonython, South Australia** that would replace ~31% of those
+imports by 2040 — for a programme cost between JobKeeper and the 2024
+Coalition nuclear policy on a per-taxpayer basis, with hard
+infrastructure that keeps producing after the policy window closes.
 
 ---
 
-## 1. The flexibility premium revisited
+## The strategic case
 
-`chart_buffer_partition.py` quantifies the buffer partition at three
-MeOH synthesis `min_pu` values (0.3 / 0.5 / 0.7).  Key result: at
-`min_pu=0.5`, ~60–70% of buffering moves to MeOH storage (cheap,
-ambient-pressure) rather than compressed H₂ (expensive, 20 000 AUD/MWh),
-reducing overall system cost vs the DRI-EAF configuration.
+| | |
+|---|---|
+| Australia's jet + diesel imports | ~32.6 Mt/yr (≈595 kbpd) |
+| Proportion of total liquid-fuel demand | ~80% |
+| Days of cover (IEA stockholding obligation: 90) | ~30-50 |
+| Operating refineries left | 2 (down from 7 in 2003) |
+| Both refineries reliant on | Singapore crude condensate routes through Strait of Malacca |
+| Key sea-lane choke points to AU | Hormuz, Malacca, Bab-el-Mandeb |
+| Known maritime disruption events 2023-26 | 4 (Houthi Red Sea, Q2 2026 Hormuz, two USTC incidents) |
 
----
+### Where Australia's liquid fuel actually goes
 
-## 2. The breakeven surface
+![Sectoral consumption + Whyalla supply trajectory](chart_strategic_substitution.png)
 
-`chart_breakeven_heatmap.py` produces a 2D heatmap of LCOF − import
-parity diesel across the (electrolyser CAPEX × blended CO₂ price) grid,
-with IMO Tier-1 and Tier-2 breakeven contours overlaid.
+Top panel: how Australia's ~40 Mt/yr of jet + diesel breaks down by
+end-use sector — and how much of it currently flows in through the
+Strait of Malacca (~80% imported). Bottom panel: the Whyalla
+programme's domestic synthetic supply growing from zero in 2027 to
+~8 Mt/yr of strategically-relevant diesel + jet by 2040 — enough to
+cover the entire Australian Defence Force fuel requirement many
+times over and roughly half of either mining diesel or aviation jet.
 
-Key results at WACC=11%, year 2030:
+### What needs liquid fuel — and what doesn't
 
-- **No-policy breakeven** requires CAPEX < ~600 AUD/kW AND CO₂ < 100 AUD/t
-  — achievable only in the IEA NZE scenario by 2038.
-- **IMO Tier-1 (+400/t)** breakeven shifts to CAPEX < 1 200 AUD/kW at
-  CO₂ = 195 AUD/t; achievable from ~2034 under BNEF central.
-- **IMO Tier-2 (+800/t)** breakeven at CAPEX < 1 800 AUD/kW; achievable
-  from ~2031 under BNEF central at steelworks CO₂ (80/t).
+![Electrification feasibility by sector, 2024 vs 2040](chart_electrification_split.png)
 
-The static breakeven surface is predominantly red in 2030, turning green
-first in the top-left corner (low CAPEX, cheap CO₂, strong policy).
+Synthetic fuel is for the sectors that physically cannot electrify
+within the policy window. Light-duty road, urban buses, last-mile
+delivery, short-haul rail, light agriculture and harbour ferries
+already have credible battery-electric pathways with most of their
+demand decarbonised by 2040. Long-haul heavy road, aviation, deep-sea
+marine, remote off-grid mining, ADF deployment fuel and heavy
+construction are the genuine hard-to-electrify residual — about
+**28-30 Mt/yr by 2040**, the addressable market for a domestic
+synthetic-fuels programme. The Whyalla programme delivers ~10 Mt/yr
+of that, **without competing with sectors that batteries already
+solve**.
 
-## 3. Cost of capital
+The defence ledger compounds this. The ADF runs on diesel + JP-5/JP-8.
+AUKUS submarines are nuclear but their escort fleet, at-sea
+replenishment, and basing infrastructure are not. Mining, agriculture,
+heavy transport — the Diesel Fuel Rebate beneficiaries that exempt
+$10 B/yr of fuel excise — are the strategic primary industries that
+underwrite Australia's export economy. None of them have a viable
+import-substitute if the sea-lanes close.
 
-The model adopts the FOAK→NOAK step from the DRI-EAF sibling repo:
-**13%→9% WACC linear 2030–2035** (`foak_to_noak` path).  The `noak_only`
-path (9% flat) is available for de-risked comparison.  CRF values used
-in all LCOM/LCOF calculations:
-
----
-
-## 4. CO₂ supply — five-tranche merit-order curve
-
-`co2_supply.py` implements the merit-order CO₂ supply curve with five
-tranches.  The blended price is ~190 AUD/t in 2030 (base weights: 50%
-steelworks, 25% Nyrstar, 25% DAC) declining to ~120 AUD/t by 2040.
-
-| Source | AUD/t CO₂ (2030) | AUD/t CO₂ (2040) | Volume | Window |
-| --- | ---: | ---: | ---: | --- |
-| **Whyalla Steelworks DRI off-gas** | 80 | 80 | 2.0 Mt/yr | 2028–2035 |
-| **Nyrstar Port Pirie smelter** | 100 | 100 | 0.4 Mt/yr | always |
-| **Santos Moomba CCS** | 100 | 100 | 1.7 Mt/yr | from 2032 |
-| **Adbri Birkenhead cement** | 100 | 100 | 1.0 Mt/yr | always |
-| **Direct Air Capture** | 500 | 300 | unbounded | always |
-
-Three CO₂ supply paths for scenario runs:
-- **`industrial_blend`**: all five tranches (default)
-- **`dac_backfill_early`**: DAC + Santos + Adbri (skips steelworks + Nyrstar)
-
-`chart_co2_supply_curve.py` plots the stacked dispatch by source over
-2030–2040 with the blended-price overlay.
+**Synthetic fuel made in Australia is the only domestic option that
+preserves the existing fleet** (no engine retrofits, no new
+distribution network, drop-in compatible with diesel and Jet A).
+Battery-electric road transport handles light-duty private vehicles
+on a 15-30 year horizon; diesel and jet fuel for heavy transport,
+aviation, marine, defence, mining, and agriculture cannot
+realistically electrify in that window.
 
 ---
 
-## 5. Transition trajectories — three named scenarios
+![Whyalla synthetic-fuels trajectory — headline panel](chart_trajectory.png)
 
-`trajectory_ispypsa.py` implements a myopic year-by-year solver across
-three compound scenarios (crash-resume, argparse CLI).
+## The proposition
 
-| Scenario | CAPEX path | CO₂ path | Fuel price | WACC |
-| --- | --- | --- | --- | --- |
-| **`policy_stated`** | BNEF central | industrial blend | import parity | 13→9% |
-| **`imo_binding`** | BNEF central | industrial blend | IMO Tier-2 | 13→9% |
-| **`foak_stranded`** | BNEF slow | DAC backfill early | import parity | 13% flat |
+A programme that builds out to **10.2 Mt/yr of finished fuel by 2040**
+(≈175 kbpd, ~31% of jet + diesel imports), with cumulative taxpayer
+cost over 2027-2040 sitting in the JobKeeper-to-nuclear band:
 
-Run:
+| Scenario          | What happens                                       | Cumulative cost     | vs JobKeeper | vs Nuclear |
+|-------------------|----------------------------------------------------|---------------------|-------------:|-----------:|
+| **imo_binding**   | IMO Tier-1 + SAF blending mandates kick in 2032   | **$6,643 / taxpayer** |  86%        |    66%     |
+| **policy_stated** | Stated-policies baseline (no new carbon premium)  | **$8,267 / taxpayer** | 107%        |    82%     |
+| **foak_stranded** | Slow capex decline + 13% WACC + no policy premium | **$10,126 / taxpayer**| 131%        |   100%     |
 
-```bash
-python trajectory_ispypsa.py --years 2030,2035,2040 --scenarios policy_stated,imo_binding,foak_stranded
+**Comparable Australian taxpayer commitments (2027-2040 horizon):**
+
+| Programme                                | Cumulative $/taxpayer | What you get |
+|------------------------------------------|----------------------:|--------------|
+| **AUKUS** (14-yr share of $368 B / 30 yr)| **$14,943**           | 8 nuclear submarines, late 2030s onwards |
+| **Diesel Fuel Rebate** (14 × $10 B)      | **$12,174**           | Excise exemption (no asset created) |
+| **2024 Coalition nuclear policy**        | **$10,087**           | 7 nuclear plants, first online 2037 |
+| **JobKeeper** (one-off 2020-21)          | **$7,739**            | Wage subsidy (no asset created) |
+| **This proposal (central case)**         | **$8,267**            | 175 kbpd domestic synthetic-fuel capacity, ports, refineries, electrolysers, 25-30 year operating life |
+
+The AUKUS comparison is the apt one. Both are sovereign-capability
+investments, paid by the same taxpayer, on similar timescales. AUKUS
+delivers eight submarines by ~2040. This delivers ~31% of national
+liquid-fuel security, plus the renewables fleet and refining capacity
+to keep producing afterwards.
+
+JobKeeper and the Diesel Fuel Rebate are spent and gone. **This
+programme leaves behind hard infrastructure that keeps generating
+fuel — and revenue — for decades after the budget commitment ends.**
+
+![Comparable Australian Federal commitments](chart_programme_timeline.png)
+
+The chart above places the proposal alongside the four most
+recently-precedented Australian Federal commitments. Spend windows
+are solid; operational windows where the asset keeps delivering after
+the budget commitment ends are hatched. The Whyalla programme (thick
+black border) sits between JobKeeper (cheapest, no asset) and the
+2024 Coalition nuclear policy (more expensive, similar timescale,
+single-product).
+
+---
+
+## Why Whyalla / Port Bonython is the right site
+
+No other location in Australia combines all five of the following.
+Strategically, this is the *only* candidate site that pencils:
+
+1. **Existing fuel-import terminal infrastructure.** Port Bonython
+   already operates 81 ML of diesel storage with ~1 B L/yr throughput
+   under Mitsubishi/Petro Diamond. The 2.4 km wharf takes capesize
+   vessels to 110,000 DWT. The federal+state-funded Hydrogen Hub
+   ($100 M, finalised October 2023) underwrites common-user upgrades.
+   **Domestic synthetic fuel can flow into the same offtake network
+   that currently handles imports** — no greenfield distribution
+   build required.
+
+2. **2,000 ha of industrial-zoned, deep-water-adjacent land** with
+   Barngarla Determination engagement complete. Whyalla Industrial
+   Estate adds a further 238 ha already optioned. Few sites in
+   Australia can absorb a multi-GW industrial precinct without
+   land-acquisition or planning frictions on the critical path.
+
+3. **World-class renewables on the AEMO Draft 2026 ISP traces.**
+   REZ S5 Northern SA capacity factors: ~25% solar PV (single-axis
+   tracking), ~35-45% wind, with thermal-wind peaking afternoon/
+   evening to complement solar — the single most valuable native
+   electrolyser firming feature in the NEM. AEMO publishes a
+   dedicated REZ S5 CST trace at ~51% capacity factor with bundled
+   ~8h molten-salt storage dispatch.
+
+4. **A live, six-tranche CO₂ supply curve** at A$80-500/t:
+   - Whyalla Steelworks DRI off-gas (transition-window only,
+     declining as the H₂ fraction in the shaft furnace rises 2029-40)
+   - Nyrstar Port Pirie post-combustion (85 km)
+   - Santos Moomba CCS pipeline-deliverable from 2032
+   - Adbri Birkenhead cement (sea-freightable from Adelaide)
+   - Direct Ocean Capture co-located with Northern Water at Mullaquana (from 2032)
+   - DAC as backstop
+
+   None of this requires technology that doesn't already exist
+   commercially.
+
+5. **Strategic adjacencies that don't exist elsewhere:**
+   - **Northern Water desalination** (260 ML/day, FID FY2026/27,
+     first water 2029) makes process water a sub-1% cost item.
+   - **DRI-EAF waste heat** at the steelworks next door — ~200 GWh_th/yr
+     of high-grade off-gas otherwise vented, available for adjacent
+     hydrothermal-liquefaction biofuel ponds.
+   - **Port Bonython storage and offtake** — already reading and
+     blending Singapore product daily.
+   - **Project EnergyConnect** (Stage 2 commissioning Q4 2026) puts
+     5.3 GW of new transmission capacity through ElectraNet's
+     Davenport hub.
+
+---
+
+## What the model actually builds
+
+The model lets the optimiser choose between **e-fuel** and **biofuel**
+pathways, all sharing common downstream infrastructure (hydrogen,
+CO₂, heat, refinery, product buses):
+
+```
+                   Renewables (wind + solar + battery + CST)
+                                  │
+                          ┌───────┴───────┐
+                          ▼               ▼
+                    AC bus           Heat bus
+                          │               │
+                          ▼               │   ┌──── DRI waste heat (free, steelworks site)
+                    Electrolyser           │
+                          │               │
+                          ▼               ▼
+                       H₂ bus ◄─── electric heater / H₂ burner / CST
+                          │
+                  ┌───────┴────────────────┐
+                  ▼                        ▼
+          MeOH synthesis              HEFA / pyrolysis
+              (CO₂ + 3H₂)            (halophyte / mallee / saltbush)
+                  │                        │
+                  ▼                        ▼
+                MeOH ◄────────  biomass gasification
+                  │                  (biogenic H₂ + CO₂)
+                  ▼
+                Refinery (FT + multi-feed shared hydrocracker)
+                  │
+        ┌─────────┼────────┬────────────────┐
+        ▼         ▼        ▼                ▼
+     Diesel    Kero     Naphtha           Wax
+                                         (specialty)
 ```
 
-Output: `trajectory.csv` (year × scenario rows) + `trajectory_state.json`
-(crash-resume state).  `chart_trajectory.py` plots a 2×3 panel grid
-from this CSV.
+**Three pathways compete on cost surface** to deliver each product:
+
+- **e-fuels** — wind/solar/CST → electrolyser → H₂ → MeOH synth → FT-style refinery
+- **HEFA** — Salicornia (halophyte) oil → hydrotreatment → kero+diesel
+- **Pyrolysis / gasification** — coppice mallee + saltbush biomass
+
+**HTL** (algae → biocrude) is built into the model topology but does not
+get selected at current parameters (high capex per dry-tonne capacity);
+it would activate if oil prices >A$4,000/t or HTL capex falls below
+A$30k/(t_dry/yr). The pathway is geographically split into a
+**steelworks-adjacent site** (free DRI waste heat, limited land) and
+a **Port Bonython coastal site** (paid heat, more land) so the LP can
+pick the better trade-off if either becomes economic.
+
+**Biomass supply curves** (replacing earlier flat caps) — modelled like
+the CO₂ tranche curve, with rising marginal cost as the LP climbs the
+land-quality curve:
+
+| Tranche | Area (ha) | Yield (t/ha/yr) | Delivered cost (AUD/t) |
+|---------|----------:|----------------:|-----------------------:|
+| Mallee tier 1 (Eyre Peninsula arable)        | 15,000  | 8.0 | 60   |
+| Mallee tier 2 (mid-yield dryland)            | 40,000  | 6.0 | 110  |
+| Mallee tier 3 (marginal pastoral)            | 150,000 | 4.0 | 180  |
+| Saltbush tier 1 (coastal saline)             | 15,000  | 5.0 | 90   |
+| Saltbush tier 2 (degraded pastoral)          | 50,000  | 3.0 | 140  |
+| Halophyte oil tier 1 (NW outfall-adjacent)   | 5,000   | 1.2 | 1,200 (per t oil) |
+| Halophyte oil tier 2 (inland saline)         | 25,000  | 0.8 | 1,800 (per t oil) |
+
+Total biomass cap available: ~1.18 Mt_dry/yr lignocellulose + 26 kt/yr
+halophyte oil — enough for ~400 kt/yr of biofuel, supplementing the
+e-fuel volumes from 2029 onward.
 
 ---
 
-## 6. The cumulative case
+## The three scenarios
 
-*TODO(§6): equivalent to the DRI-EAF repo's Chart 6.  Cumulative fossil
-methanol / VLSFO / Jet A displaced, and the carbon-liability equivalent
-under each policy path.*
+Each scenario varies three independent levers — **electrolyser capex
+trajectory**, **fossil-fuel price premium**, and **process WACC**:
+
+| lever                  | policy_stated         | imo_binding             | foak_stranded             |
+|------------------------|-----------------------|-------------------------|---------------------------|
+| Electrolyser capex     | fast (1500→700 AUD/kW)| same                    | slow (1800→1200 AUD/kW)   |
+| Fossil price premium   | none                  | +A$400/t diesel + A$350/t kero from 2032 | none |
+| Process WACC           | 11%                   | 11%                     | 13%                       |
+
+### `policy_stated` — central case
+World follows IEA/IRENA stated policies. Fossil prices on UK DESNZ 2024
+Scenario C with the Hormuz risk premium fading by 2030. Electrolyser
+on the IEA NZE-adjacent fast-decline curve. **No regulatory price
+floor on green fuels.**
+
+### `imo_binding` — best case
+Same physics + capex, but **from 2032 a real CO₂-intensity pricing or
+blending mandate kicks in**:
+- **+A$400/t diesel** — IMO Tier-1 carbon-intensity penalty on bunker
+  fuel passing through to road diesel.
+- **+A$350/t kero** — ReFuelEU-style SAF blending-mandate shadow price
+  (or Australian equivalent).
+
+Crucially this is a **revenue effect on fossil-equivalent product**,
+not a green-fuel subsidy: the regulatory market lifts the floor under
+what fossil sells for, so the green premium gap narrows. That's why
+`imo_binding` is below JobKeeper — much of the gap is plugged by the
+carbon market, not by the public budget.
+
+### `foak_stranded` — pessimistic tail
+**Slow electrolyser cost decline**, **no fossil-price premium** (carbon
+mandates either don't materialise or are watered down), **WACC stuck
+at 13%**. The "what if the world flinches" scenario; caps near the
+nuclear-policy benchmark.
+
+### Capital works schedule per scenario
+
+The bottom panel below shows annual capex bars; the top panel shows a
+Gantt-style commissioning schedule for each major asset.
+
+**`policy_stated`**
+
+![Capital works — policy_stated](chart_capital_works_policy_stated.png)
+
+**`imo_binding`**
+
+![Capital works — imo_binding](chart_capital_works_imo_binding.png)
+
+**`foak_stranded`**
+
+![Capital works — foak_stranded](chart_capital_works_foak_stranded.png)
 
 ---
 
-## 7. MeOH synthesis + refinery co-dispatch
+## Where the costs come from
 
-*TODO(§7): the key co-dispatch trade-off is different from the DRI-EAF
-case.  There are three buffers in series:*
+![LCOF cost stack at 2040 by scenario](chart_cost_stack.png)
 
-1. *Upstream: **H₂ storage** (compressed, expensive per kWh)*
-2. *Middle: **CO₂ storage** (liquid, cheap per tonne, short cycle)*
-3. *Downstream: **MeOH storage** (ambient-pressure tank farm, very
-   cheap per MWh)*
+LCOF (levelised cost of fuel) at 2040 policy_stated = **A$3,465 per
+tonne diesel-equivalent**, vs fossil diesel at A$2,150 — about a 60%
+premium. The chart above decomposes this for all three scenarios.
+Electricity dominates (~$1,760-1,860/t) — more than process capex
++ CO₂ + residual combined. The IMO premium scenario raises gross
+revenue by $300/t (closing some of the gap) but doesn't materially
+shift LCOF; the FOAK-stranded scenario adds ~$330/t to total cost
+through higher electricity (~$95/t extra) and process capex (~$235/t
+extra) on the same fuel slate.
 
-*Optimal partition: do most of the arbitrage at the MeOH buffer,
-because MeOH synthesis itself prefers steady-state operation
-(catalyst thermal cycling penalty, though this is debated).  That
-inverts the DRI-EAF result where H₂ storage is the primary buffer.*
+Cost stack per tonne:
 
-### 7b. Refinery (placeholder)
+| Component                                   |  $/t  | % of stack |
+|---------------------------------------------|------:|-----------:|
+| Electricity (renewables × chain efficiency) | 1,800 | 52%        |
+| Process capex (electrolyser, synth, refinery)|   850 | 25%        |
+| CO₂ supply (six-tranche merit order)        |   500 | 14%        |
+| Heat (CST + electric heater + H₂ burner)    |   170 |  5%        |
+| Storage (H₂ + MeOH + CO₂ buffers)           |   145 |  4%        |
 
-The refinery block in `efuels_components.attach_efuels()` accepts a
-`refinery_mode` of `None`, `"MTG"`, `"MTJ"`, or `"FT"`, with
-placeholder LHV efficiencies (see `efuels_physics.py`).  The link is
-sized to zero by default — calibrate per-pathway CAPEX, O&M, and
-product price once Section 7 analysis is settled, then enable the mode
-in `trajectory_ispypsa.run_trajectory(refinery_mode=...)`.
+The dominant cost is **electricity** — driven by the chain efficiency
+(~42% AC-to-fuel LHV: electrolyser × MeOH synth × refinery) and the
+shadow price of renewables capex feeding through the AC bus balance.
+Smaller wins:
 
-Pathway sketches for the placeholder:
+- WACC dropping from 11% (FOAK) to 8% (NOAK by 2035) — saves
+  ~A$300/t.
+- CST + steam turbine (modelled but uneconomic at default A$4,300/kW_th
+  Aurora-benchmark capex; would activate if CST capex falls below
+  ~A$2,500/kW_th, which AEMO ISP cost-decline curves anticipate by 2035).
 
-- **MTG (ExxonMobil / Topsoe TIGAS)** — MeOH → DME → gasoline-range
-  hydrocarbons.  44% mass yield, 88% LHV efficiency.  Bankable product
-  = MOGAS at refinery gate.
-- **MTJ (methanol-to-jet)** — MeOH → olefins → oligomerisation →
-  hydrotreating.  ~75–80% LHV efficiency.  Product = drop-in SAF
-  (ReFuelEU Aviation Annex I-eligible).
-- **FT (Fischer-Tropsch)** — parallel pathway from H₂ + CO (reverse
-  water-gas shift to synthesise CO from CO₂ + H₂, then FT synthesis).
-  ~60–70% LHV efficiency overall.  Included for completeness; less
-  mature than MTJ for SAF.
+### Where the CO₂ comes from
+
+Stacked dispatch by source over time. The LP picks the cheapest tranche
+first — Whyalla Steelworks DRI off-gas (until the H₂ fraction rises
+~2035) and Nyrstar Port Pirie at the bottom of the merit order; Santos
+Moomba CCS and Adbri cement come on from 2032; Direct Ocean Capture at
+the Northern Water site backs them up; Direct Air Capture takes any
+shortfall. Blended price is plotted alongside.
+
+![CO₂ supply curve](chart_co2_supply_curve.png)
+
+### How the network actually dispatches
+
+Hourly dispatch in 2030, 2035, and 2040 — wind, solar, electrolyser
+draw, MeOH synthesis steady-state behaviour, battery cycling, and
+grid balancing. Shows that the LP exploits the H₂ + MeOH buffer chain
+to keep MeOH synthesis near steady-state while the upstream renewables
+are highly variable.
+
+![Dispatch — hourly behaviour at three model years](chart_dispatch.png)
+
+### Buffer partition (diagnostic)
+
+Where the optimiser puts buffering between renewables and MeOH
+synthesis at three different synthesis ramp-flexibility values.
+Shows the H₂ → CO₂ → MeOH storage trade-off:
+
+![Buffer partition vs synth flexibility](chart_buffer_partition.png)
+
+### Sensitivity heatmaps
+
+Three 2D parameter sweeps showing where the cost surface is sensitive:
+
+**Fossil prices vs LCOF.** What happens to the cost gap if oil prices
+go higher / lower than DESNZ Scenario C predicts.
+
+![Fossil prices × LCOF](chart_biofuels_sweep_prices_lcof.png)
+
+**Mandate × diesel price → biofuel volume.** How the optimiser shifts
+between e-fuel and biofuel as the policy mandate scales.
+
+![Mandate × diesel price → biofuel output](chart_biofuels_sweep_mandate_output.png)
+
+**DRI waste heat × mandate → LCOF.** How much it matters that the
+algae-HTL pathway can tap free steelworks waste heat.
+
+![DRI waste heat × mandate → LCOF](chart_biofuels_sweep_heat_lcof.png)
 
 ---
 
-## 8. Synthesis
+## Reproducing the analysis
 
-*TODO(§8): once §§1–7 are populated, write the four or five
-paragraph-long key findings in the sibling repo's style.*
-
----
-
-## Scenarios modelled
-
-*TODO: matrix table once §5 is wired in.*
-
-## Model structure
-
-**Network topology.**  ISPyPSA-derived NEM-wide operational network is
-used as the electricity-side substrate.  Whyalla e-fuels components are
-grafted on via `attach_efuels()` at the SA Northern sub-region bus
-(auto-discovered via `resolve_sa_north_bus()`).  Buses added:
-
-- `H2_Whyalla` (carrier: H2) — electrolyser output, H₂ storage
-- `CO2_Whyalla` (carrier: CO2) — aggregated CO₂ supply + short-cycle tank
-- `MeOH_Whyalla` (carrier: MeOH) — synthesis output, MeOH tank farm, and
-  either direct export offtake or refinery feed
-- `Fuel_Whyalla` (carrier: Fuel) — refinery product (zero-sized until
-  `refinery_mode` is set)
-
-**Electrolyser + H₂ storage.**  Identical physics to the sibling repo:
-PEM at 70% LHV, 20-yr life, CAPEX input parameter; compressed H₂ at
-$20k/MWh, 25-yr life.
-
-**Methanol synthesis.**  Single Link, `bus0=H2_Whyalla`,
-`bus1=MeOH_Whyalla`, `bus2=CO2_Whyalla`, `bus3=SA_N` (aux electricity).
-LHV efficiency 0.83; stoichiometric CO₂ (1.375 t/t MeOH) and aux
-electricity (0.3 MWh/t MeOH) flow from their respective buses.
-
-**CO₂ supply.**  Currently a single aggregated `Generator` on
-`CO2_Whyalla` at `co2_price_per_t`.  §4 of this README will decompose
-this into DAC / biogenic / industrial components with separate marginal
-costs and capacity constraints.
-
-**Offtake.**  Both the MeOH and the refinery offtakes are modelled as
-negative-marginal-cost sink Generators capped at the plant nameplate,
-so the optimiser sizes production endogenously up to the offtake limit.
-Swap to fixed-`p_set` Loads once a binding offtake contract anchors the
-scenario.
-
-**Time resolution.**  Inherited from ISPyPSA config — 30-minute
-operational, weekly rolling horizon with 2-day overlap (same as sibling
-repo).  See `ispypsa_config_whyalla.yaml`.
-
-## Caveats and limitations
-
-- **Greenfield assumption.**  The model ignores any shared infrastructure
-  savings from co-locating with the existing Whyalla steelworks
-  (shared substation, port berth, hydrogen offtake with DRI shaft).  A
-  full integrated Whyalla model would couple this repo with the sibling
-  DRI-EAF repo at the `SA_N` bus and jointly optimise.
-- **CO₂ supply is a scalar marginal cost, not a supply curve.**  Until
-  §4 is populated, all CO₂ flows at a single price.
-- **Refinery yields are placeholders.**  MTG / MTJ / FT efficiencies are
-  literature averages; real-project yields depend heavily on product
-  slate and hydrotreating severity.
-- **Single weather year, frozen price profile, myopic annual solve.**
-  Same caveats as the sibling repo.
-
-## Dependencies
+Every figure in this README is reproducible from `trajectory.csv` plus
+a handful of standalone solve scripts. The end-to-end regen — solve
+plus all chart scripts — runs from a single shell entry point:
 
 ```bash
-pip install -r requirements.txt
+cd projects/efuels
+./run.sh                    # full regen (~10-12 min)
+./run.sh policy_stated      # single-scenario mode (~3-4 min)
 ```
 
-Data acquisition (manual — see `ispypsa_config_whyalla.yaml` header):
-AEMO IASR 2024 workbook and ISP 2024 trace data.
+The script runs four stages: (1) the LP trajectory solve, (2) the
+trajectory-driven charts (six panel + capital works × 3 scenarios +
+CO₂ supply curve), (3) the fuel-security framing charts (cost stack,
+strategic substitution, programme timeline, electrification split),
+and (4) the standalone solve diagnostics (dispatch, buffer partition,
+biofuels sensitivity 3×3 sweep).
 
-In this tree the workbook, trace data, and parsed-workbook cache are
-**symlinked** from the sibling repo at `../../Downloads/whyalla/data/`.
-See the symlinks in [data/](data/) — no re-download required if the
-parent repo already has them.
+The model is built on **PyPSA** with **HiGHS** as the solver. Network
+substrate uses the AEMO Draft 2026 ISP REZ S5 Northern SA traces for
+wind, solar, and CST.
 
-## File inventory
+---
 
-### Core model
+## What you can change
 
-| File | Description |
-| --- | --- |
-| `efuels_physics.py` | Physical constants and stoichiometry (H₂, CO₂, MeOH, MTG/MTJ/FT efficiencies) |
-| `efuels_components.py` | `attach_efuels()` — grafts e-fuels complex onto any PyPSA network at a SA_N bus |
-| `efuels_results.py` | `extract_efuels_results()` — electrolyser / MeOH / storage / refinery metrics from a solved network |
-| `ispypsa_adapter.py` | ISPyPSA pipeline adapter (build + solve NEM operational network for a given scenario × year) |
-| `ispypsa_config_whyalla.yaml` | Base ISPyPSA configuration (symlink-compatible with sibling repo) |
+The most-toggled parameters and where they live:
 
-### Verification
+| Knob | File | Default | Try |
+|------|------|--------:|-----|
+| Mandate path (Mt/yr) | `generate_trajectory.py:MANDATE_PATH_MT` | 1.0 → 10.2 | scale via `--mandate-scale 0.5` |
+| WACC (process FOAK)  | `generate_trajectory.py:SCENARIOS` | 11% / 13% | 8% (NOAK) |
+| Renewables WACC      | `generate_trajectory.py:RENEWABLES_WACC` | 7% | 5-8% |
+| Electrolyser capex   | `generate_trajectory.py:CAPEX_PATHS` | 1500→700 (fast) | tune for own conviction |
+| H₂ storage capex     | facility config | A$20k/MWh (tank) | A$5k/MWh (cavern, see Caveats) |
+| CO₂ tranches         | `co2_supply.py:_TRANCHES` | 6 sources, A$80-500/t | tune per source |
+| Biomass tranches     | `biofuels/biomass_supply.py` | 5 lignocellulose + 2 halophyte + 3 algae | scale areas/yields |
+| Fossil price path    | `generate_trajectory.py:DIESEL_BASE` etc. | DESNZ 2024 Scenario C | apply own oil-price view |
 
-| File | Description |
-| --- | --- |
-| `smoke_ispypsa.py` | Single-year ISPyPSA solve smoke test |
-| `test_attach_efuels.py` | Unit tests: electrolyser + MeOH synthesis build/no-build under favourable / hostile economics; refinery mode wiring |
+---
 
-### Trajectory (placeholder)
+## Caveats — read before quoting numbers
 
-| File | Description |
-| --- | --- |
-| `trajectory_ispypsa.py` | Multi-year myopic solver — **placeholder**; scenario matrix not yet populated (see §5) |
+1. **The mandate is exogenous.** The model assumes a federal/state
+   mandate or CfD lifts production from 0 in 2027 to 10.2 Mt/yr by
+   2040. Without that, no commercial actor would build at this scale
+   on a base-case fossil price.
+2. **H₂ storage is vessels only (A$20k/MWh).** No SA salt-cavern
+   geology is reachable from Whyalla — the closest candidate (Polda
+   Basin, southern Eyre Peninsula) is ~250-300 km south, too far for
+   cost-effective pipeline transport at this scale. The model anchors
+   to compressed-vessel literature and the Hydrogen Jobs Plan
+   reference site (250 MW PEM + 3,600 t = 120 GWh H₂ vessels at
+   Cultana). The model's $20k/MWh sits at the lower end of vessel
+   cost literature ($24-45k/MWh from ARENA / IEA), so this assumption
+   is mildly optimistic; a $30k/MWh sensitivity run would lift LCOF
+   ~$50-100/t.
+3. **CST + steam turbine sit at zero capacity in the LP equilibrium.**
+   At the Aurora-Project benchmark (A$4,300/kW_th bundled with 8h salt
+   storage) it's marginally uneconomic vs grid-anchored renewables +
+   electric heater. Cost-decline curves would activate it ~2035.
+4. **The refinery slate is fixed** at hydrocracked-FT proportions
+   (15% naphtha / 45% kero / 35% diesel / 5% wax). Real refineries
+   can flex this within a band; we don't model that flex (would
+   slightly improve LCOF when one product is dramatically more
+   valuable than another).
+5. **Process WACC is FOAK-conservative.** 11-13% reflects current
+   first-of-a-kind risk. Successful 2030-FID cases would refinance
+   at ~8% by 2035-37, saving ~A$300/t fuel — not modelled.
+6. **CO₂ accounting is now stoichiometric.** An earlier modelling
+   bug (parallel `refinery_{product}` Links) over-consumed CO₂ by
+   3.35× and inflated LCOF by ~4×. The bug was found by mass-balance
+   diagnostic and fixed (single multi-output `refinery` Link, matching
+   the biofuel pathway pattern). All current numbers reflect the fix.
+7. **No second-order effects modelled** — and these all run in the
+   same direction (towards making the net case stronger):
+   - **Strategic / fuel-security premium.** No notional dollar value
+     applied for replacing 31% of imported liquid fuel with sovereign
+     production. The Defence-of-Australia Strategic Review (2023)
+     explicitly identifies fuel security as a Tier-1 capability gap.
+   - **Stranded-refinery offset.** Both Lytton and Geelong sit on
+     Federal life-support (FSSP) extended to 2030. Any cost
+     comparison should be net of the cost of *not* maintaining
+     domestic refining capacity.
+   - **Diesel-rebate substitution.** Domestic synthetic fuel
+     supplied to Diesel Fuel Rebate beneficiaries (mining, ag,
+     fisheries, ADF) keeps the $10 B/yr rebate spending circulating
+     in the Australian economy rather than leaving via fuel imports.
+   - **Regional employment / industrial-policy multipliers.**
+     A 10 Mt/yr precinct at Whyalla / Port Bonython supports an
+     estimated 4,000-6,000 direct construction FTE peak and
+     1,500-2,500 ongoing operations FTE — none of which are in the
+     current model.
+   - **Export option value.** RFNBO-certified e-kero into ReFuelEU
+     Aviation premium markets (2032+) is worth A$1,200-2,500/t over
+     fossil jet — the model does not allow excess production to be
+     exported for that revenue.
 
-## Running order
+   Every one of these would *reduce* the modelled per-taxpayer cost.
 
-```bash
-# 0. Set up environment
-pip install -r requirements.txt
+---
 
-# 1. Verify ISPyPSA wiring
-python smoke_ispypsa.py
+## Project structure
 
-# 2. Verify Whyalla attachment and solve on a stub network
-pytest test_attach_efuels.py -v
-
-# 3. Trajectory — once §5 scenarios are implemented
-# python trajectory_ispypsa.py
+```
+projects/efuels/
+  generate_trajectory.py        — main solver (3 scenarios × 8 years)
+  process_chain.py              — attach_efuels(): e-fuel topology
+  efuels_physics.py             — H₂/CO₂/MeOH stoichiometry constants
+  efuels_results.py             — extract_lcom_lcof(): cost decomposition
+  co2_supply.py                 — 6-tranche CO₂ merit-order curve
+  fossil_reference.py           — wholesale fuel price benchmarks
+  heat_integration.py           — process heat bus, CST, electric heater, H₂ burner
+  biofuels/                     — pathways colocated on shared buses
+    biomass_supply.py             — tiered biomass supply curves
+    pathway_htl.py                — algae HTL (steelworks + Port Bonython sites)
+    pathway_hefa.py               — Salicornia HEFA
+    pathway_biomass.py            — mallee+saltbush pyrolysis & gasification
+  chart_*.py                    — six chart scripts (see above)
+  run.sh                        — single-entry-point shell runner (solve + all charts)
+  run.py                        — Python helper: default_config() + minimal solve
+  trajectory.csv                — 24-row output table
+  RESEARCH.md                   — original evidence dossier
 ```
 
-## Next steps
+---
 
-1. **Settle the plant-sizing anchor** — pick A, B, or C from the Thesis
-   table and derive the others from it.  Update
-   `DEFAULT_MEOH_TONNES_PER_YEAR` and the sizing derivation block.
-2. **Populate §4 CO₂ supply scenarios** — replace the single
-   `co2_supply` Generator with a supply curve of {Moomba CCS, industrial
-   flues, DAC, biogenic} tranches at distinct marginal costs.
-3. **Populate §5 scenario matrix** — wire `SCENARIOS` dict in
-   `trajectory_ispypsa.py` and run the first pass.
-4. **Populate §7b refinery** — calibrate CAPEX, O&M, and product price
-   for each of MTG / MTJ / FT; run with `refinery_mode` enabled; report
-   whether the raw-MeOH export baseline dominates or the integrated
-   refinery does.
-5. **Integrated Whyalla model** — couple this repo and the sibling
-   DRI-EAF repo at `SA_N` and jointly optimise; test whether the two
-   loads cannibalise or complement each other's flexibility premium
-   (mirrors §7 of the sibling repo, but with an e-fuels plant as the
-   second flex load instead of an EAF).
+## The fuel-security argument in one paragraph
 
-## References
+Australia spent ~$89 B on JobKeeper and is committing ~$368 B to
+AUKUS — both consequential national-interest decisions, neither
+producing a tradeable industrial asset. The same per-taxpayer cost
+as JobKeeper, or ~55% of AUKUS, would buy domestic production
+capacity for ~31% of Australia's jet + diesel imports by 2040 —
+fuel that flows from a precinct on Australian sovereign soil,
+through Australian-owned ports, to the Australian fleet, ADF, and
+diesel-rebate beneficiaries who underwrite the export economy. The
+infrastructure keeps producing for 25-30 years after the policy
+window ends. Under the most optimistic policy scenario the public
+budget contribution falls below JobKeeper. Under the most pessimistic,
+it caps at the proposed nuclear plan. The question is no longer
+whether the technology works — it does, every unit operation has
+commercial precedent — but whether Australia chooses to apply the
+same risk appetite to fuel security that it has already applied to
+submarines and pandemic wage support.
 
-See the sibling repo README's reference list for shared sources
-(IEA GHR 2024, IRENA Green H₂, BNEF LCOH, AEMO ISP 2026 draft, Hydrogen
-Council / McKinsey, OECD WP 227, Stegra / HYBRIT capital stacks, etc.).
-E-fuels-specific references to be added as §§1–8 are populated:
+---
 
-- IEA (2023). *The Role of E-fuels in Decarbonising Transport.*
-- IRENA / Methanol Institute (2021). *Innovation Outlook: Renewable Methanol.*
-- European Commission (2023). *ReFuelEU Aviation Regulation* (EU 2023/2405).
-- European Commission (2023). *FuelEU Maritime Regulation* (EU 2023/1805).
-- IMO MEPC 83 (Apr 2025). *Net-Zero Framework for International Shipping.*
-- Carbon Recycling International (2023). *George Olah Renewable Methanol Plant — Operating Data.*
-- ExxonMobil / Topsoe. *TIGAS Methanol-to-Gasoline Technology.*
-- Australian Government (2024). *Low-Carbon Liquid Fuels Strategy Consultation.*
+## What's next on the modelling side
+
+Three calibrations would tighten the headline finding further:
+
+1. **Refine the H₂ storage capex band** to the upper end of vessel
+   literature (A$30k/MWh central, A$45k worst case). The current
+   A$20k/MWh anchor sits at the optimistic end; a sensitivity run
+   would lift LCOF $50-100/t and is worth doing for defensibility.
+2. **Add the chemistry-synergy gaps still on the to-do list:**
+   electrolyser O₂ → gasifier oxidant, biogenic CO₂ from
+   HTL/HEFA/pyrolysis upgrading byproducts. Each ~3-5% LCOF.
+3. **Cross-couple to the dri-eaf project** at the AC bus — joint
+   optimisation might further reduce renewable overbuild because the
+   steelworks load and the e-fuels load are partially complementary
+   (steelworks consumes baseload, fuels can chase peaks).
+
+#2 and #3 push the number toward `imo_binding` (i.e., closer to the
+JobKeeper benchmark). #1 pushes it the other way. Net direction
+depends on which dominates; both should be modelled before quoting
+final figures.
+
+---
+
+Built with PyPSA + HiGHS. Wind, solar, and CST traces from AEMO Draft
+2026 ISP REZ S5 Northern SA. Source-code comments document the
+calibration decisions; supporting evidence and citations live in
+`RESEARCH.md`.

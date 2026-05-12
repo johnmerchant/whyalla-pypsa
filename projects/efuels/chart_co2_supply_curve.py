@@ -23,21 +23,35 @@ import pandas as pd
 from co2_supply import HOURS_PER_YEAR, build_co2_supply_curve, blended_co2_price
 
 TRANCHE_COLORS = {
-    "co2_steelworks":    "#2ecc71",
-    "co2_nyrstar":       "#3498db",
-    "co2_santos_moomba": "#9b59b6",
-    "co2_adbri_cement":  "#e67e22",
-    "co2_dac":           "#e74c3c",
-    "co2_supply":        "#95a5a6",   # legacy fallback
+    "co2_steelworks":       "#2ecc71",
+    "co2_nyrstar":          "#3498db",
+    "co2_santos_moomba":    "#9b59b6",
+    "co2_adbri_cement":     "#e67e22",
+    "co2_doc_spencer_gulf": "#1abc9c",
+    "co2_dac":              "#e74c3c",
+    "co2_supply":           "#95a5a6",   # legacy fallback
 }
 TRANCHE_LABELS = {
-    "co2_steelworks":    "Whyalla Steelworks DRI",
-    "co2_nyrstar":       "Nyrstar Port Pirie",
-    "co2_santos_moomba": "Santos Moomba CCS",
-    "co2_adbri_cement":  "Adbri Birkenhead cement",
-    "co2_dac":           "DAC backfill",
-    "co2_supply":        "Aggregated CO₂",
+    "co2_steelworks":       "Whyalla Steelworks DRI",
+    "co2_nyrstar":          "Nyrstar Port Pirie",
+    "co2_santos_moomba":    "Santos Moomba CCS",
+    "co2_adbri_cement":     "Adbri Birkenhead cement",
+    "co2_doc_spencer_gulf": "Ocean Capture @ Northern Water",
+    "co2_dac":              "DAC backfill",
+    "co2_supply":           "Aggregated CO₂",
 }
+# Stack & legend order — cheapest tranches at the bottom, DAC backfill at top.
+# Matches the merit order used by build_co2_supply_curve (industrial point
+# sources first, then ocean capture, then DAC).
+TRANCHE_ORDER = [
+    "co2_steelworks",
+    "co2_nyrstar",
+    "co2_adbri_cement",
+    "co2_santos_moomba",
+    "co2_doc_spencer_gulf",
+    "co2_dac",
+    "co2_supply",
+]
 # Years to plot when no trajectory.csv is available (fallback parametric path).
 FALLBACK_YEARS = list(range(2030, 2041))
 
@@ -81,6 +95,7 @@ def _parametric_co2(year: int, scenario: str = "policy_stated") -> dict[str, flo
 
 def plot(scenario: str, csv: Path | None, outpath: Path) -> None:
     # ── Load or synthesise CO₂ dispatch by year ───────────────────────────
+    actual_blended_by_year: dict[int, float] = {}
     if csv and csv.exists():
         df = pd.read_csv(csv)
         df = df[df.scenario == scenario].sort_values("year") if "scenario" in df.columns else df
@@ -88,6 +103,11 @@ def plot(scenario: str, csv: Path | None, outpath: Path) -> None:
             int(row.year): _parse_co2_by_source(row)
             for _, row in df.iterrows()
         }
+        if "co2_blended_price" in df.columns:
+            for _, row in df.iterrows():
+                v = row.get("co2_blended_price")
+                if pd.notna(v):
+                    actual_blended_by_year[int(row.year)] = float(v)
     else:
         co2_by_year = {
             y: _parametric_co2(y, scenario)
@@ -95,11 +115,19 @@ def plot(scenario: str, csv: Path | None, outpath: Path) -> None:
         }
 
     years = sorted(co2_by_year)
-    all_tranches = sorted(set(k for d in co2_by_year.values() for k in d))
+    # Drop years with zero total dispatch (pre-commissioning) — they
+    # confuse the price panel and add empty bars.
+    years = [y for y in years if sum(co2_by_year.get(y, {}).values()) > 0]
+    if not years:
+        raise SystemExit("No CO₂ dispatch data to plot.")
+    present_tranches = set(k for y in years for k in co2_by_year.get(y, {}))
+    ordered_tranches = [t for t in TRANCHE_ORDER if t in present_tranches]
+    # Append any unknown tranches at the end (defensive).
+    ordered_tranches += [t for t in present_tranches if t not in ordered_tranches]
 
     # ── Build stacked bar data ─────────────────────────────────────────────
     data = {t: [co2_by_year.get(y, {}).get(t, 0) / 1e6 for y in years]
-            for t in all_tranches}
+            for t in ordered_tranches}
 
     fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 9),
                                    gridspec_kw={"height_ratios": [3, 1]})
@@ -113,8 +141,8 @@ def plot(scenario: str, csv: Path | None, outpath: Path) -> None:
              ha="center", fontsize=10, color="dimgrey")
 
     bottom = np.zeros(len(years))
-    for tranche, vals in data.items():
-        vals_arr = np.array(vals, dtype=float)
+    for tranche in ordered_tranches:
+        vals_arr = np.array(data[tranche], dtype=float)
         ax1.bar(years, vals_arr, bottom=bottom,
                 color=TRANCHE_COLORS.get(tranche, "grey"),
                 label=TRANCHE_LABELS.get(tranche, tranche),
@@ -123,25 +151,43 @@ def plot(scenario: str, csv: Path | None, outpath: Path) -> None:
 
     # Annotate 1 Mt/y reference line (scale aid)
     ax1.axhline(1.0, color="black", linestyle=":", linewidth=1.0, alpha=0.5)
-    ax1.text(years[0] - 0.4, 1.0, "1 Mt/yr",
-             fontsize=7.5, color="dimgrey", va="center", ha="right")
+    ax1.text(years[-1] + 0.4, 1.0, "1 Mt/yr",
+             fontsize=7.5, color="dimgrey", va="center", ha="left")
 
     ax1.set_ylabel("CO₂ captured each year (million tonnes)", fontsize=10)
     ax1.set_title("Sources of CO₂ used by the plant", fontsize=11, fontweight="bold")
-    ax1.legend(fontsize=9, loc="upper left", title="CO₂ source")
+    # Reverse legend so cheap-tranche colours read top-to-bottom matching
+    # the bottom-up stack (DAC backfill on top of the bar = bottom of the
+    # legend list).
+    handles, labels = ax1.get_legend_handles_labels()
+    ax1.legend(handles[::-1], labels[::-1],
+               fontsize=9, loc="upper left", title="CO₂ source")
     ax1.grid(axis="y", alpha=0.3)
 
     # ── Blended price line ─────────────────────────────────────────────────
-    blend_prices = [blended_co2_price(y) for y in years]
-    ax2.plot(years, blend_prices, color="darkred", linewidth=2.0,
-             marker="o", markersize=5, label="Average CO₂ price paid")
-    ax2.fill_between(years, blend_prices, alpha=0.15, color="darkred")
+    # Prefer dispatch-weighted prices from trajectory.csv (only defined for
+    # years where the plant actually sources CO₂); fall back to the
+    # parametric estimator only if the column is empty.
+    if actual_blended_by_year:
+        price_years = sorted(y for y in years if y in actual_blended_by_year)
+        blend_prices = [actual_blended_by_year[y] for y in price_years]
+        price_label = "Dispatch-weighted CO₂ price paid"
+    else:
+        price_years = years
+        blend_prices = [blended_co2_price(y) for y in price_years]
+        price_label = "Parametric CO₂ blended price"
+
+    ax2.plot(price_years, blend_prices, color="darkred", linewidth=2.0,
+             marker="o", markersize=5, label=price_label)
+    ax2.fill_between(price_years, blend_prices, alpha=0.15, color="darkred")
     ax2.set_ylabel("AUD per tonne of CO₂", fontsize=10)
     ax2.set_xlabel("Year", fontsize=10)
     ax2.set_title("Average price of CO₂ feedstock", fontsize=11, fontweight="bold")
     ax2.grid(alpha=0.3)
     ax2.legend(fontsize=9)
     ax2.set_ylim(0, None)
+    # Keep both panels on the same x-range so the bars line up with the price line.
+    ax2.set_xlim(ax1.get_xlim())
 
     plt.tight_layout(rect=[0, 0, 1, 0.955])
     plt.savefig(outpath, dpi=150, bbox_inches="tight")

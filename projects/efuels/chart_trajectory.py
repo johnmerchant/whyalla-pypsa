@@ -48,6 +48,58 @@ FOSSIL_REFS = [
     ("Diesel pump — 2025 (pre-crisis)",   DIESEL_RETAIL_AUD_PER_L_2025, "#7f8c8d"),
 ]
 
+# ── Imports-displacement conversions ─────────────────────────────────────
+# The plant's output is benchmarked against AU's diesel + jet fuel imports
+# specifically. Gasoline/petrol is excluded on the assumption that road
+# passenger transport electrifies through the 2030s (EV uptake + AU federal
+# fuel-efficiency standard from 2025). Diesel and jet are the "hard to
+# electrify" cuts — heavy haul, rail, mining, shipping, aviation.
+# bbl/t conversion weighted for plant's kero+diesel output (0.35/0.45 split):
+#   (0.35/0.80)×7.33 + (0.45/0.80)×7.86 = 7.63 bbl/t
+BBL_PER_T_TRANSPORT_FUEL = 7.63
+
+# AU diesel + jet imports baseline (DCCEEW Fuel Security statistics, 2024):
+#   Diesel consumption ~29 Mt/y ≈ 580 kbpd, ~80% imported → ~465 kbpd
+#   Jet consumption   ~8 Mt/y ≈ 170 kbpd, ~75% imported → ~130 kbpd
+#   Combined diesel+jet imports ≈ 595 kbpd
+AU_DIESEL_JET_IMPORTS_KBPD = 595.0
+AU_DIESEL_CONSUMPTION_KBPD = 580.0
+AU_JET_CONSUMPTION_KBPD = 170.0
+
+# ── Familiar government-program benchmarks (per-taxpayer cumulative) ─────
+# 14-year cumulative figures (AUD/taxpayer, 11.5M taxpayers — ATO 2024).
+# Selected for credibility with a fiscally-conservative reader: programs
+# the Coalition has championed (AUKUS, 2024 nuclear policy, JobKeeper),
+# funded (Inland Rail, NBN) or actively defends (Diesel Fuel Tax Credits).
+AU_TAXPAYERS = 11_500_000
+_TRAJECTORY_YEARS = 14  # 2027 → 2040
+
+# AUKUS: ~$368B AUD over 30y (AU DoD 2023 outlook); 14y pro-rata share
+AUKUS_CUMULATIVE_PER_TAXPAYER = (368_000_000_000 * _TRAJECTORY_YEARS / 30) / AU_TAXPAYERS
+# 2024 Coalition nuclear policy: 7-reactor build — capital cost central
+# estimate $116B (AEMO / CSIRO GenCost-adjacent independent modelling).
+# Coalition's own Frontier Economics 2024 analysis cited up to $211B on
+# gross build; conservative AEMO figure used here for defensibility.
+COALITION_NUCLEAR_CUMULATIVE_PER_TAXPAYER = 116_000_000_000 / AU_TAXPAYERS
+# Diesel Fuel Tax Credits Scheme: ~$10B/y (ATO 2024 published refunds,
+# mostly mining + agriculture). Direct fossil-diesel subsidy baseline.
+DIESEL_REBATE_CUMULATIVE_PER_TAXPAYER = (10_000_000_000 * _TRAJECTORY_YEARS) / AU_TAXPAYERS
+# JobKeeper: $89B total (Treasury 2021 final cost) — one-off
+JOBKEEPER_CUMULATIVE_PER_TAXPAYER = 89_000_000_000 / AU_TAXPAYERS
+# NBN rollout total cost: ~$51B (ANAO 2020) — one-off
+NBN_CUMULATIVE_PER_TAXPAYER = 51_000_000_000 / AU_TAXPAYERS
+# Inland Rail: ~$31B (ARTC 2024 revised estimate) — one-off Coalition project
+INLAND_RAIL_CUMULATIVE_PER_TAXPAYER = 31_000_000_000 / AU_TAXPAYERS
+
+PROGRAM_BENCHMARKS = [
+    ("AUKUS (share over 14y)",             AUKUS_CUMULATIVE_PER_TAXPAYER,            "#2c3e50"),
+    ("Diesel Fuel Rebate (14y)",           DIESEL_REBATE_CUMULATIVE_PER_TAXPAYER,    "#7f8c8d"),
+    ("2024 Coalition nuclear policy",      COALITION_NUCLEAR_CUMULATIVE_PER_TAXPAYER, "#34495e"),
+    ("JobKeeper (one-off, 2020-21)",       JOBKEEPER_CUMULATIVE_PER_TAXPAYER,         "#95a5a6"),
+    ("NBN rollout (one-off)",              NBN_CUMULATIVE_PER_TAXPAYER,               "#bdc3c7"),
+    ("Inland Rail (one-off)",              INLAND_RAIL_CUMULATIVE_PER_TAXPAYER,       "#d5dbdb"),
+]
+
 
 def load(csv: Path) -> pd.DataFrame:
     df = pd.read_csv(csv)
@@ -98,11 +150,14 @@ def plot(df: pd.DataFrame, outpath: Path) -> None:
                     color=colour, linewidth=1.6, linestyle="--",
                     marker="s", markersize=4, alpha=0.75,
                     label=f"{SCENARIO_LABELS.get(sc, sc)} (fossil path)")
-    # Today's pump reference lines (crisis vs pre-crisis, for lay orientation)
+    # Today's pump reference lines (crisis vs pre-crisis, for lay orientation).
+    # Anchor the labels to the right edge so they sit clear of the legend at
+    # the top-left of the panel.
+    x_label = df.year.max() + 0.4
     for label, price, colour in FOSSIL_REFS:
         ax.axhline(price, color=colour, linestyle=":", linewidth=1.1, alpha=0.7)
-        ax.text(df.year.max(), price, f" {label}  ${price:.2f}/L",
-                fontsize=7.5, color=colour, va="center", ha="left",
+        ax.text(x_label, price, f" {label}  ${price:.2f}/L",
+                fontsize=7.0, color=colour, va="center", ha="left",
                 bbox=dict(facecolor="white", edgecolor="none", alpha=0.75, pad=1))
     # Premium callout: best-case e-fuel vs worst-case fossil path in 2040
     df_2040 = df[df.year == df.year.max()]
@@ -110,12 +165,12 @@ def plot(df: pd.DataFrame, outpath: Path) -> None:
     priciest_fossil = aud_per_litre(df_2040["diesel_price_per_t"].max(), "diesel")
     mult_fossil = cheapest_lcof / priciest_fossil
     mult_retail = cheapest_lcof / DIESEL_RETAIL_AUD_PER_L
-    ax.text(0.02, 0.97,
+    ax.text(0.98, 0.03,
             f"In 2040, best-case e-fuel is\n"
             f"~{mult_fossil:.1f}× modelled wholesale diesel\n"
             f"~{mult_retail:.1f}× today's retail pump",
             transform=ax.transAxes, fontsize=8, fontweight="bold",
-            color="#c0392b", va="top",
+            color="#c0392b", va="bottom", ha="right",
             bbox=dict(facecolor="white", edgecolor="#c0392b", alpha=0.85, pad=4))
     ax.set_title("Synthetic diesel cost vs rising fossil prices\n"
                  "(solid = e-fuel, dashed = model's peak-oil/IMO path)",
@@ -123,56 +178,62 @@ def plot(df: pd.DataFrame, outpath: Path) -> None:
     ax.set_ylabel("AUD per litre", fontsize=10)
     ax.set_xlabel("Year", fontsize=9)
     ax.set_ylim(0, None)
+    # Reserve right-edge space for the fossil-pump annotations.
+    ax.set_xlim(df.year.min() - 0.3, df.year.max() + 6.5)
     ax.grid(alpha=0.3)
-    ax.legend(fontsize=6.5, loc="center left", ncol=1)
+    ax.legend(fontsize=6.5, loc="upper left", ncol=1)
 
-    # ── [0,1] Annual fuel production ──────────────────────────────────────
+    # ── [0,1] Mandate-driven total fuel production ────────────────────────
     ax = axes[0, 1]
-    _scenario_lines(ax, df, "diesel_tonnes", scale=1e-6)
-    ax.set_title("Synthetic diesel produced per year", fontsize=11, fontweight="bold")
+    _scenario_lines(ax, df, "mandated_fuel_mt")
+    ax.set_title("Synthetic fuel delivered (mandated volume)",
+                 fontsize=11, fontweight="bold")
     ax.set_ylabel("Million tonnes per year", fontsize=10)
     ax.set_xlabel("Year", fontsize=9)
-    ax.set_ylim(0, 1.0)   # fix range so near-identical scenarios don't explode
+    ax.set_ylim(0, None)
     ax.yaxis.get_major_formatter().set_useOffset(False)
     ax.grid(alpha=0.3)
-    ax.legend(fontsize=8, loc="lower right")
-    ax.text(0.02, 0.98,
-            "All scenarios converge to the\n"
-            "0.5 Mt/yr dossier target",
+    ax.legend(fontsize=8, loc="upper left")
+    ax.text(0.98, 0.02,
+            "Ramp driven by SAF / IMO /\n"
+            "hypothetical AU federal low-carbon\n"
+            "liquid fuel mandate",
             transform=ax.transAxes, fontsize=7.5, color="dimgrey",
-            va="top", ha="left",
+            va="bottom", ha="right",
             bbox=dict(facecolor="white", edgecolor="lightgrey", alpha=0.7, pad=3))
 
-    # ── [0,2] Climate benefit ─────────────────────────────────────────────
+    # ── [0,2] Diesel + jet imports displaced (hard-to-electrify cuts) ─────
     ax = axes[0, 2]
     for sc in df.scenario.unique():
         sub = df[df.scenario == sc].sort_values("year")
-        # Total fuel abatement: sum diesel + kero (both displace fossil)
-        fuel_t = sub.get("diesel_tonnes", pd.Series(0)).fillna(0) + \
-                 sub.get("kero_tonnes", pd.Series(0)).fillna(0)
-        co2_abated_mt = fuel_t * DIESEL_LIFECYCLE_CO2_T_PER_T * 1e-6
-        ax.plot(sub.year, co2_abated_mt,
+        # Only count the plant's diesel + kero output (aviation + heavy-haul)
+        transport_t = sub.get("kero_tonnes", pd.Series(0)).fillna(0) + \
+                      sub.get("diesel_tonnes", pd.Series(0)).fillna(0)
+        kbpd_displaced = transport_t * BBL_PER_T_TRANSPORT_FUEL / 365 / 1e3
+        ax.plot(sub.year, kbpd_displaced,
                 color=SCENARIO_COLORS.get(sc, "grey"),
-                linewidth=2.2, marker="o", markersize=5,
+                linewidth=2.5, marker="o", markersize=5,
                 label=SCENARIO_LABELS.get(sc, sc))
-    # Annotate one value as "≈ N cars"
     latest = df[df.scenario == "policy_stated"].sort_values("year").iloc[-1]
-    co2_example = (latest["diesel_tonnes"] + latest.get("kero_tonnes", 0)) \
-                   * DIESEL_LIFECYCLE_CO2_T_PER_T
-    cars_example = co2_example / PASSENGER_CAR_CO2_T_PER_YR
-    ax.set_title("Avoided CO₂ emissions vs fossil fuels",
+    latest_kbpd = (latest.get("kero_tonnes", 0) + latest.get("diesel_tonnes", 0)) \
+                   * BBL_PER_T_TRANSPORT_FUEL / 365 / 1e3
+    pct_imports = latest_kbpd / AU_DIESEL_JET_IMPORTS_KBPD * 100
+    ax.set_title("Diesel + aviation fuel imports displaced\n"
+                 "(hard-to-electrify transport cuts)",
                  fontsize=11, fontweight="bold")
-    ax.set_ylabel("Million tonnes CO₂e per year avoided", fontsize=10)
+    ax.set_ylabel("Thousand barrels per day (kbpd)", fontsize=10)
     ax.set_xlabel("Year", fontsize=9)
-    ax.set_ylim(0, 1.5)
-    ax.yaxis.get_major_formatter().set_useOffset(False)
+    ax.set_ylim(0, None)
     ax.grid(alpha=0.3)
-    ax.legend(fontsize=8, loc="lower right")
-    ax.text(0.02, 0.97,
-            f"≈ {cars_example/1e6:.1f} million passenger\ncars off the road",
-            transform=ax.transAxes, fontsize=8.5, fontweight="bold",
-            color="#27ae60", va="top",
-            bbox=dict(facecolor="white", edgecolor="#27ae60", alpha=0.85, pad=4))
+    ax.legend(fontsize=8, loc="upper left")
+    ax.text(0.98, 0.02,
+            f"By 2040 (policy-stated): ~{latest_kbpd:.0f} kbpd kero+diesel onshore\n"
+            f"≈ {pct_imports:.1f}% of AU's ~{AU_DIESEL_JET_IMPORTS_KBPD:.0f} kbpd diesel+jet imports\n"
+            f"(gasoline excluded — assumed electrified by 2035)\n"
+            f"Aviation + heavy haul cannot easily electrify",
+            transform=ax.transAxes, fontsize=7.5, fontweight="bold",
+            color="#2c3e50", va="bottom", ha="right",
+            bbox=dict(facecolor="white", edgecolor="#2c3e50", alpha=0.85, pad=4))
 
     # ── [1,0] Electrolyser MW ─────────────────────────────────────────────
     ax = axes[1, 0]
@@ -191,39 +252,88 @@ def plot(df: pd.DataFrame, outpath: Path) -> None:
             transform=ax.transAxes, fontsize=7.5, color="dimgrey", va="top",
             bbox=dict(facecolor="white", edgecolor="lightgrey", alpha=0.7, pad=3))
 
-    # ── [1,1] Electrolyser CAPEX input path ───────────────────────────────
+    # ── [1,1] Annual taxpayer subsidy (AUD billion) ───────────────────────
     ax = axes[1, 1]
-    _scenario_lines(ax, df, "capex_per_kw")
-    ax.set_title("Assumption: electrolyser installed cost",
+    for sc in df.scenario.unique():
+        sub = df[df.scenario == sc].sort_values("year")
+        ax.plot(sub.year, sub["annual_subsidy_aud"] / 1e9,
+                color=SCENARIO_COLORS.get(sc, "grey"),
+                linewidth=2.2, marker="o", markersize=5,
+                label=SCENARIO_LABELS.get(sc, sc))
+    latest = df[df.scenario == "policy_stated"].sort_values("year").iloc[-1]
+    ax.set_title("What this costs the taxpayer (per year)",
                  fontsize=11, fontweight="bold")
-    ax.set_ylabel("AUD per kilowatt installed", fontsize=10)
+    ax.set_ylabel("AUD billions per year", fontsize=10)
     ax.set_xlabel("Year", fontsize=9)
     ax.set_ylim(0, None)
     ax.grid(alpha=0.3)
-    ax.legend(fontsize=8, loc="upper right")
-    ax.text(0.02, 0.02,
-            "Input assumption — drives the cost curve.\n"
-            "Lower = cheaper e-fuels.",
-            transform=ax.transAxes, fontsize=7.5, color="dimgrey",
-            va="bottom",
-            bbox=dict(facecolor="white", edgecolor="lightgrey", alpha=0.7, pad=3))
+    ax.legend(fontsize=8, loc="upper left")
+    ax.text(0.98, 0.02,
+            f"2040: ~AUD ${latest['annual_subsidy_aud']/1e9:.0f}B/yr\n"
+            "(≈ federal road budget)\n"
+            "gap between LCOF and fossil-fuel\n"
+            "wholesale revenue at mandate volume",
+            transform=ax.transAxes, fontsize=7.5, color="#c0392b",
+            va="bottom", ha="right",
+            bbox=dict(facecolor="white", edgecolor="#c0392b", alpha=0.85, pad=3))
 
-    # ── [1,2] CO₂ supply price input path ─────────────────────────────────
+    # ── [1,2] Cumulative per-taxpayer cost vs familiar program benchmarks ───
     ax = axes[1, 2]
-    _scenario_lines(ax, df, "co2_blended_price")
-    ax.set_title("Assumption: CO₂ feedstock price (blended)",
+    cum_totals: dict[str, float] = {}
+    for sc in df.scenario.unique():
+        sub = df[df.scenario == sc].sort_values("year")
+        years = sub.year.to_numpy()
+        annual = sub.annual_subsidy_aud.to_numpy()
+        cum = [0.0]
+        for i in range(1, len(years)):
+            gap = years[i] - years[i-1]
+            avg_subsidy = 0.5 * (annual[i] + annual[i-1])
+            cum.append(cum[-1] + avg_subsidy * gap)
+        cum_per_tp = [c / AU_TAXPAYERS for c in cum]
+        cum_totals[sc] = cum_per_tp[-1]
+        ax.plot(years, cum_per_tp,
+                color=SCENARIO_COLORS.get(sc, "grey"),
+                linewidth=2.5, marker="o", markersize=5,
+                label=SCENARIO_LABELS.get(sc, sc),
+                zorder=3)
+
+    # Reference lines against familiar government programs.
+    xmin, xmax = df.year.min(), df.year.max()
+    for label, val, colour in PROGRAM_BENCHMARKS:
+        ax.axhline(val, color=colour, linestyle="--", linewidth=1.2,
+                   alpha=0.85, zorder=1)
+        ax.text(xmax, val, f"  {label}: ${val:,.0f}",
+                fontsize=7.5, color=colour, va="center", ha="left",
+                bbox=dict(facecolor="white", edgecolor="none", alpha=0.85, pad=1))
+
+    ax.set_title("Cumulative cost per Australian taxpayer\n"
+                 "vs familiar government programs (2027-2040)",
                  fontsize=11, fontweight="bold")
-    ax.set_ylabel("AUD per tonne CO₂", fontsize=10)
+    ax.set_ylabel("AUD per taxpayer (cumulative)", fontsize=10)
     ax.set_xlabel("Year", fontsize=9)
     ax.set_ylim(0, None)
     ax.grid(alpha=0.3)
-    ax.legend(fontsize=8, loc="upper right")
-    ax.text(0.02, 0.02,
-            "Weighted avg of CO₂ sources:\nsteelworks, Nyrstar, Santos,\n"
-            "Adbri cement, DAC backfill.",
-            transform=ax.transAxes, fontsize=7.5, color="dimgrey",
-            va="bottom",
-            bbox=dict(facecolor="white", edgecolor="lightgrey", alpha=0.7, pad=3))
+    ax.legend(fontsize=8, loc="upper left")
+
+    worst = max(cum_totals.values())
+    best = min(cum_totals.values())
+    pct_aukus = worst / AUKUS_CUMULATIVE_PER_TAXPAYER * 100
+    pct_diesel_rebate = worst / DIESEL_REBATE_CUMULATIVE_PER_TAXPAYER * 100
+    pct_nuclear = worst / COALITION_NUCLEAR_CUMULATIVE_PER_TAXPAYER * 100
+    ax.text(0.02, 0.97,
+            f"Whyalla 2027-2040:\n"
+            f"${best:,.0f}–${worst:,.0f} per taxpayer\n"
+            f"≈ {pct_nuclear:.0f}% of 2024 Coalition nuclear policy\n"
+            f"≈ {pct_aukus:.0f}% of AUKUS share\n"
+            f"≈ {pct_diesel_rebate:.0f}% of existing diesel rebate",
+            transform=ax.transAxes, fontsize=7.5, fontweight="bold",
+            color="#2c3e50", va="top", ha="left",
+            bbox=dict(facecolor="white", edgecolor="#2c3e50", alpha=0.85, pad=4))
+
+    # Force integer year ticks everywhere
+    from matplotlib.ticker import MaxNLocator
+    for ax in axes.flat:
+        ax.xaxis.set_major_locator(MaxNLocator(integer=True, nbins=8))
 
     plt.tight_layout(rect=[0, 0, 1, 0.945])
     plt.savefig(outpath, dpi=150, bbox_inches="tight")

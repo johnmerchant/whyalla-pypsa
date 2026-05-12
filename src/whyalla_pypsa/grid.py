@@ -41,14 +41,27 @@ def _residual_price(
     return price.clip(lower=floor, upper=ceiling)
 
 
-def attach_grid_price(network, config: FacilityConfig):
-    """Add a grid-supply Generator at `{subregion}_ac` with time-varying cost."""
+def attach_grid_price(
+    network,
+    config: FacilityConfig,
+    *,
+    carbon_price_per_t_co2: float = 0.0,
+):
+    """Add a grid-supply Generator at `{subregion}_ac` with time-varying cost.
+
+    `carbon_price_per_t_co2` is passed through to `attach_sa_dispatch` so the
+    SA thermal fleet's marginal cost reflects the carbon price — the facility
+    then sees carbon-signalled wholesale prices endogenously through imports.
+    Ignored in `rldc_merit` mode (price trace is already fixed).
+    """
     if config.grid.mode == "sa_dispatch":
         # 3-subregion SA overlay with VIC/NSW slacks. Kept in a separate module
         # to keep this file lean; lazy-import to avoid circular dependency.
         from whyalla_pypsa.sa_network import attach_sa_dispatch
 
-        return attach_sa_dispatch(network, config)
+        return attach_sa_dispatch(
+            network, config, carbon_price_per_t_co2=carbon_price_per_t_co2,
+        )
     if config.grid.mode == "price_trace":
         # TODO: wire once confirmed available in Draft 2026.
         raise NotImplementedError(

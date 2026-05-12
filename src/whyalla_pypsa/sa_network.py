@@ -58,6 +58,15 @@ BESS_ROUNDTRIP = 0.88
 # Marginal cost proxy for SA thermal fleet (gas peakers + mid-merit, AUD/MWh).
 DEFAULT_THERMAL_MARGINAL_COST = 100.0
 
+# Emission factor for the SA thermal-gen aggregate (tCO2/MWh sent-out).
+# SA's mid-merit fleet is predominantly gas CCGT/OCGT (Pelican Point, Torrens
+# Island B, Osborne) with an average sent-out intensity of ~0.55 tCO2/MWh.
+# Composite (AEMO ESOO 2023 estimate); flat across the horizon because fleet
+# composition is largely fixed through the trajectory window. Used to
+# carbon-adjust each `{sub}_thermal` generator's marginal_cost so the LP
+# endogenously produces a carbon-signalled wholesale price at each SA bus.
+DEFAULT_THERMAL_EMISSION_FACTOR_T_PER_MWH = 0.55
+
 # Default representative REZ trace site per subregion.
 _WIND_SITE_BY_SUB: dict[str, str] = {
     "CSA": "S3_WH_Mid-North_SA",
@@ -323,6 +332,8 @@ def attach_sa_dispatch(
     config: FacilityConfig,
     *,
     thermal_marginal_cost: float = DEFAULT_THERMAL_MARGINAL_COST,
+    thermal_emission_factor_t_per_mwh: float = DEFAULT_THERMAL_EMISSION_FACTOR_T_PER_MWH,
+    carbon_price_per_t_co2: float = 0.0,
     xml_path: Path | None = None,
     ggo_path: Path | None = None,
     _override_demand: _DemandOverride | None = None,
@@ -405,14 +416,21 @@ def attach_sa_dispatch(
             marginal_cost=0.0,
         )
 
-        # Thermal (gas mid-merit + flexible)
+        # Thermal (gas mid-merit + flexible). Carbon-adjusted marginal cost
+        # so the LP produces a wholesale price that already embeds the CO2
+        # price — the facility then pays carbon-signalled import prices
+        # automatically through its grid_import link, no separate Scope 2
+        # charge needed.
+        thermal_mc = thermal_marginal_cost + (
+            carbon_price_per_t_co2 * thermal_emission_factor_t_per_mwh
+        )
         network.add(
             "Generator",
             f"{sub}_thermal",
             bus=bus,
             carrier="electricity",
             p_nom=ggo_mw["thermal"],
-            marginal_cost=thermal_marginal_cost,
+            marginal_cost=thermal_mc,
         )
 
         # BESS: Bus + charge Link + discharge Link + Store (4h, 0.88 round-trip).

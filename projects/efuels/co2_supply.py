@@ -1,7 +1,7 @@
 """CO₂ supply curve for the Whyalla e-fuels model.
 
 Builds a list of supply tranches (each mapped to a separate PyPSA Generator on
-the ``CO2_Whyalla`` bus) reflecting the five-source portfolio described in
+the ``CO2_Whyalla`` bus) reflecting the six-source portfolio described in
 RESEARCH.md §4 and the plan workstream B.
 
 Tranche definitions
@@ -16,7 +16,12 @@ Tranche definitions
    available from 2032 when pipeline lead-time allows.
 4. Adbri Birkenhead cement (Adelaide, 370 km by sea) — LEILAC or
    post-combustion; available throughout modelling period.
-5. DAC backfill — unbounded, declining price over time.
+5. Direct Ocean Capture co-located with Northern Water desal (Mullaquana,
+   20 km south of Whyalla) — electrolytic DOC (Captura / Equatic-style)
+   piggy-backing on Northern Water's seawater intake pumps + brine-discharge
+   infrastructure. Available from 2032 (NW commissions 2031 + DOC scale-up).
+   Declining cost per Captura/Equatic/DOE targets.
+6. DAC backfill — unbounded, declining price over time.
 
 Each tranche is returned as a ``dict`` compatible with ``pypsa.Network.add()``
 for a Generator.  ``attach_efuels()`` in ``efuels_components.py`` iterates
@@ -75,6 +80,17 @@ _TRANCHES: list[CO2Tranche] = [
         available_until=9999,
     ),
     CO2Tranche(
+        name="co2_doc_spencer_gulf",
+        # Capacity sized for a dedicated DOC plant co-located with Northern
+        # Water desal at Mullaquana (20 km from Whyalla). 2 Mt/y upper bound
+        # reflects what's physically plausible piggy-backing on the 260 ML/d
+        # product capacity (520-650 ML/d raw intake) plus brine side-stream.
+        p_nom_annual_t=2_000_000,
+        marginal_cost=450.0,        # placeholder — actual from _doc_price(year)
+        available_from=2032,        # NW operational 2031 + DOC commercial scale
+        available_until=9999,
+    ),
+    CO2Tranche(
         name="co2_dac",
         p_nom_annual_t=1e12,        # effectively unbounded
         marginal_cost=500.0,        # AUD/t in 2030; declines to 300 by 2040
@@ -94,6 +110,20 @@ _DAC_PRICE_SCHEDULE: dict[int, float] = {
     2035: 400.0,
     2038: 350.0,
     2040: 300.0,
+}
+
+# DOC cost decline schedule for a co-located DOC plant at Northern Water
+# Mullaquana site. Defensible midpoint of Captura / Equatic / Brineworks /
+# DOE targets (2024-2025 literature), converted to AUD @ 0.66 AUD/USD,
+# with ~20-30% co-location-synergy discount vs standalone DOC (shared
+# intake pumps, brine-discharge infra, grid connection, site). Always
+# strictly cheaper than DAC thanks to ~140× higher CO₂ concentration in
+# seawater vs atmosphere.
+_DOC_PRICE_SCHEDULE: dict[int, float] = {
+    2032: 450.0,
+    2035: 300.0,
+    2038: 250.0,
+    2040: 200.0,
 }
 
 
@@ -137,17 +167,12 @@ def steelworks_co2_t(year: int) -> float:
 
 def _dac_price(year: int) -> float:
     """Interpolated DAC price for *year* (AUD/t CO₂)."""
-    years_sorted = sorted(_DAC_PRICE_SCHEDULE)
-    if year <= years_sorted[0]:
-        return _DAC_PRICE_SCHEDULE[years_sorted[0]]
-    if year >= years_sorted[-1]:
-        return _DAC_PRICE_SCHEDULE[years_sorted[-1]]
-    for i, y in enumerate(years_sorted):
-        if y > year:
-            y0, y1 = years_sorted[i - 1], y
-            p0, p1 = _DAC_PRICE_SCHEDULE[y0], _DAC_PRICE_SCHEDULE[y1]
-            return p0 + (p1 - p0) * (year - y0) / (y1 - y0)
-    return _DAC_PRICE_SCHEDULE[years_sorted[-1]]  # unreachable
+    return _interp_schedule(_DAC_PRICE_SCHEDULE, year)
+
+
+def _doc_price(year: int) -> float:
+    """Interpolated DOC (ocean-capture) price for *year* (AUD/t CO₂)."""
+    return _interp_schedule(_DOC_PRICE_SCHEDULE, year)
 
 
 def build_co2_supply_curve(year: int) -> list[dict]:
@@ -167,7 +192,12 @@ def build_co2_supply_curve(year: int) -> list[dict]:
     for tranche in _TRANCHES:
         if year < tranche.available_from or year > tranche.available_until:
             continue
-        mc = _dac_price(year) if tranche.name == "co2_dac" else tranche.marginal_cost
+        if tranche.name == "co2_dac":
+            mc = _dac_price(year)
+        elif tranche.name == "co2_doc_spencer_gulf":
+            mc = _doc_price(year)
+        else:
+            mc = tranche.marginal_cost
         # Steelworks fades with the shaft furnace's H₂ fraction.
         if tranche.name == "co2_steelworks":
             annual_t = steelworks_co2_t(year)

@@ -14,6 +14,7 @@ colors = {
     "Policy-stated + gas flat": "#3d85c6",
     "CBAM-binding + gas rising": "#cc4125",
     "Delayed action + gas flat": "#888888",
+    "No gas (100% H2)": "#8e44ad",
 }
 
 fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 5.5))
@@ -32,7 +33,7 @@ ax1.set_title("Cumulative emissions abatement vs pure gas-DRI\n"
               "(earlier action = steeper ramp, more cumulative benefit)", fontsize=11)
 ax1.legend(fontsize=9, loc="upper left")
 ax1.grid(alpha=0.3)
-ax1.set_xlim(2026, 2040)
+ax1.set_xlim(2026, 2042)
 ax1.set_ylim(bottom=0)
 
 # Right: Implied carbon cost savings per scenario
@@ -49,7 +50,7 @@ ax2.set_title("Carbon liability avoided by switching to H₂-DRI\n"
               "(emissions avoided × carbon price in each year)", fontsize=11)
 ax2.legend(fontsize=9, loc="upper left")
 ax2.grid(alpha=0.3)
-ax2.set_xlim(2026, 2040)
+ax2.set_xlim(2026, 2042)
 ax2.set_ylim(bottom=0)
 
 plt.tight_layout()

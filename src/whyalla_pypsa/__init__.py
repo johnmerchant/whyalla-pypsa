@@ -16,6 +16,7 @@ from whyalla_pypsa.facility import build_facility_network
 from whyalla_pypsa.grid import attach_grid_price
 from whyalla_pypsa.post.annuitise import annuitise, crf
 from whyalla_pypsa.post.levelised import levelised_cost
+from whyalla_pypsa import assumptions
 
 __all__ = [
     "CostAssumption",
@@ -33,4 +34,5 @@ __all__ = [
     "annuitise",
     "crf",
     "levelised_cost",
+    "assumptions",
 ]

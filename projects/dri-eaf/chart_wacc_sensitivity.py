@@ -73,7 +73,7 @@ ax.set_xlabel("Year")
 ax.set_title("H₂ transition timing across WACC scenarios\n(CBAM-binding carbon, ISP Step Change)", fontsize=11)
 ax.legend(fontsize=8, loc="upper left")
 ax.grid(alpha=0.3)
-ax.set_xlim(2026, 2040)
+ax.set_xlim(2026, 2042)
 ax.set_ylim(0, 105)
 
 # Panel 2: Electrolyser buildout
@@ -90,12 +90,12 @@ ax.set_xlabel("Year")
 ax.set_title("Capital deployment across financing regimes\n(locked-in capacity, monotonically increasing)", fontsize=11)
 ax.legend(fontsize=8, loc="upper left")
 ax.grid(alpha=0.3)
-ax.set_xlim(2026, 2040)
+ax.set_xlim(2026, 2042)
 ax.set_ylim(bottom=0)
 
 # Panel 3: Summary bar chart — H₂ share at milestones
 ax = axes[2]
-milestones = [2030, 2035, 2040]
+milestones = [2030, 2037, 2040, 2042]
 bar_order = wacc_order
 x = np.arange(len(milestones))
 width = 0.15
@@ -136,8 +136,10 @@ for wl in wacc_order:
     first_5 = sub[sub.h2_fraction > 0.05]
     first = first_5.iloc[0].year if len(first_5) > 0 else None
     r30 = sub[sub.year == 2030].iloc[0]
-    r35 = sub[sub.year == 2035].iloc[0]
+    r37 = sub[sub.year == 2037].iloc[0]
     r40 = sub[sub.year == 2040].iloc[0]
+    r42 = sub[sub.year == 2042].iloc[0]
     print(f"  {wl}: first H₂>5% = {first:.0f}  "
-          f"2030={r30.h2_fraction:.0%}  2035={r35.h2_fraction:.0%}  2040={r40.h2_fraction:.0%}  "
+          f"2030={r30.h2_fraction:.0%}  2037={r37.h2_fraction:.0%}  "
+          f"2040={r40.h2_fraction:.0%}  2042={r42.h2_fraction:.0%}  "
           f"ely2040={r40.electrolyser_mw:.0f}MW")

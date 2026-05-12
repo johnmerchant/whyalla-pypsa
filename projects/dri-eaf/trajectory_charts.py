@@ -12,14 +12,24 @@ df = df[~df.scenario.str.contains("no furnace limit")]
 
 fig, axes = plt.subplots(2, 3, figsize=(20, 10))
 
-# Filter to policy scenario rows (step_change ISP fleet) for the 3 scenario-loop panels
+# Filter to policy scenario rows (step_change ISP fleet) for the 3 scenario-loop panels.
+# LP-blend scenarios only — the no-gas (100% H2) branch is overlaid separately
+# as the net-zero reference path rather than mixed in with the blend scenarios.
+LP_BLEND_SCENARIOS = [
+    "Policy-stated + gas flat",
+    "CBAM-binding + gas rising",
+    "Delayed action + gas flat",
+]
 policy_df = df[df.isp_scenario == "step_change"]
+policy_df = policy_df[policy_df.scenario.isin(LP_BLEND_SCENARIOS)]
+nogas_df = df[(df.scenario == "No gas (100% H2)") & (df.isp_scenario == "step_change")].sort_values("year")
 
 colors = {
     "Policy-stated + gas flat": "#3d85c6",
     "CBAM-binding + gas rising": "#cc4125",
     "Delayed action + gas flat": "#888888",
 }
+NOGAS_COLOR = "#8e44ad"  # purple — net-zero reference path
 
 isp_colors = {
     "slower_growth": "#888888",
@@ -39,15 +49,18 @@ for scen in policy_df.scenario.unique():
     sub = policy_df[policy_df.scenario == scen].sort_values("year")
     ax.plot(sub.year, sub.h2_fraction * 100, "o-", color=colors[scen],
             linewidth=2, markersize=5, label=scen)
-ax.axhline(30, color="black", linestyle=":", alpha=0.4,
-           label="30% — shaft furnace upgrade threshold")
-ax.axhline(100, color="black", linestyle="--", alpha=0.2, linewidth=1)
+if len(nogas_df):
+    ax.plot(nogas_df.year, nogas_df.h2_fraction * 100, "s--", color=NOGAS_COLOR,
+            linewidth=2, markersize=6, label="Net-zero ref (100% H2 mandate)")
+ax.axhline(100, color="black", linestyle="--", alpha=0.35, linewidth=1.2,
+           label="Net-zero DRI (100% H2)")
 ax.set_ylabel("H₂ share of DRI reductant (%)", fontsize=11)
 ax.set_xlabel("Year")
-ax.set_title("Optimal H₂ blend trajectory\n(myopic year-by-year, ISP Step Change fleet)", fontsize=11)
+ax.set_title("H₂ blend trajectory vs net-zero reference\n(LP-picked blend under dual-fuel vs mandated 100% H2)",
+             fontsize=11)
 ax.legend(fontsize=9, loc="upper left")
 ax.grid(alpha=0.3)
-ax.set_xlim(2026, 2040)
+ax.set_xlim(2026, 2042)
 ax.set_ylim(0, 105)
 
 # ── Panel [0,1]: Cumulative electrolyser buildout ────────────────────────────
@@ -56,12 +69,16 @@ for scen in policy_df.scenario.unique():
     sub = policy_df[policy_df.scenario == scen].sort_values("year")
     ax.plot(sub.year, sub.electrolyser_mw, "o-", color=colors[scen],
             linewidth=2, markersize=5, label=scen)
+if len(nogas_df):
+    ax.plot(nogas_df.year, nogas_df.electrolyser_mw, "s--", color=NOGAS_COLOR,
+            linewidth=2, markersize=6, label="Net-zero ref (100% H2 mandate)")
 ax.set_ylabel("Installed electrolyser capacity (MW)", fontsize=11)
 ax.set_xlabel("Year")
-ax.set_title("Cumulative electrolyser capacity\n(monotonically increasing — locked-in prior investment)", fontsize=11)
+ax.set_title("Cumulative electrolyser capacity\n(net-zero mandate forces large buildout from day one)",
+             fontsize=11)
 ax.legend(fontsize=9, loc="upper left")
 ax.grid(alpha=0.3)
-ax.set_xlim(2026, 2040)
+ax.set_xlim(2026, 2042)
 ax.set_ylim(bottom=0)
 
 # ── Panel [0,2]: ISP sensitivity — electrolyser buildout ─────────────────────
@@ -77,7 +94,7 @@ ax.set_xlabel("Year")
 ax.set_title("Policy-stated base case: ISP fleet sensitivity — electrolyser sizing\n(lower renewable CF → larger electrolyser to compensate)", fontsize=11)
 ax.legend(fontsize=9, loc="upper left")
 ax.grid(alpha=0.3)
-ax.set_xlim(2026, 2040)
+ax.set_xlim(2026, 2042)
 ax.set_ylim(bottom=0)
 
 # ── Panel [1,0]: Annual CO₂ abatement ───────────────────────────────────────
@@ -86,14 +103,21 @@ for scen in policy_df.scenario.unique():
     sub = policy_df[policy_df.scenario == scen].sort_values("year")
     ax.plot(sub.year, sub.emissions_saved_tCO2 / 1000, "o-", color=colors[scen],
             linewidth=2, markersize=5, label=scen)
-ax.axhline(1050, color="black", linestyle="--", alpha=0.3, linewidth=1,
-           label="1,050 kt/yr — full decarbonisation")
-ax.set_ylabel("Annual CO₂ abated (kt/yr)", fontsize=11)
+if len(nogas_df):
+    ax.plot(nogas_df.year, nogas_df.emissions_saved_tCO2 / 1000, "s--",
+            color=NOGAS_COLOR, linewidth=2, markersize=6,
+            label="Net-zero ref (100% H2 mandate)")
+# Counterfactual in the model = pure gas-DRI at 560 kg CO₂/t × 1.6 Mt = 896 kt/yr.
+# Net-zero on this axis = full 896 kt avoided (scope 1 → 0, residual scope 2 only).
+ax.axhline(896, color="black", linestyle="--", alpha=0.35, linewidth=1.2,
+           label="896 kt/yr — net-zero DRI vs gas-DRI")
+ax.set_ylabel("Annual CO₂ abated (kt/yr, vs gas-DRI baseline)", fontsize=11)
 ax.set_xlabel("Year")
-ax.set_title("Emissions abatement vs pure gas-DRI\n(max 1,050 kt CO₂/yr if fully decarbonised)", fontsize=11)
+ax.set_title("Emissions abatement vs gas-DRI counterfactual\n(net-zero reference ≈ 896 kt CO₂/yr avoided at 1.6 Mt steel)",
+             fontsize=11)
 ax.legend(fontsize=9, loc="upper left")
 ax.grid(alpha=0.3)
-ax.set_xlim(2026, 2040)
+ax.set_xlim(2026, 2042)
 ax.set_ylim(bottom=0)
 
 # ── Panel [1,1]: ISP scenario H₂ fraction comparison under CBAM ─────────────
@@ -112,7 +136,7 @@ ax.set_xlabel("Year")
 ax.set_title("Policy-stated base case: ISP fleet sensitivity — H₂ share\n(slower renewable build slows H₂ uptake, not ceiling)", fontsize=11)
 ax.legend(fontsize=9, loc="upper left")
 ax.grid(alpha=0.3)
-ax.set_xlim(2026, 2040)
+ax.set_xlim(2026, 2042)
 ax.set_ylim(0, 105)
 
 # ── Panel [1,2]: CAPEX decline + carbon price (step_change only) ─────────────
@@ -141,7 +165,7 @@ ax.set_title("Policy-stated base case: input trajectories\n(green = electrolyser
 lns = l1 + l2
 ax.legend(lns, [l.get_label() for l in lns], fontsize=9, loc="center right")
 ax.grid(alpha=0.3)
-ax.set_xlim(2026, 2040)
+ax.set_xlim(2026, 2042)
 
 plt.tight_layout()
 plt.savefig(HERE / "chart4_trajectory.png", dpi=140, bbox_inches="tight")
@@ -154,7 +178,7 @@ print("=" * 80)
 for scen in policy_df.scenario.unique():
     sub = policy_df[policy_df.scenario == scen].drop_duplicates(subset=["year"]).set_index("year")
     print(f"\n{scen}:")
-    for yr in [2028, 2030, 2035, 2040]:
+    for yr in [2028, 2030, 2033, 2037, 2040, 2042]:
         if yr in sub.index:
             r = sub.loc[yr]
             print(f"  {yr}: H2={r.h2_fraction:.1%}  electrolyser={r.electrolyser_mw:.0f} MW  "
@@ -171,10 +195,10 @@ for scen in policy_df.scenario.unique():
         print(f"  {scen}: never in trajectory")
 
 # ISP sensitivity summary
-print("\nISP sensitivity (Policy-stated + gas flat) — H₂ share 2035 and 2040:")
+print("\nISP sensitivity (Policy-stated + gas flat) — H₂ share 2037, 2040 and 2042:")
 for isp in ["slower_growth", "step_change", "accelerated_transition"]:
     sub = policy_isp[policy_isp.isp_scenario == isp].drop_duplicates(subset=["year"]).set_index("year")
-    for yr in [2035, 2040]:
+    for yr in [2037, 2040, 2042]:
         if yr in sub.index:
             r = sub.loc[yr]
             print(f"  {isp_labels[isp]}: {yr} H2={r.h2_fraction:.1%}  electrolyser={r.electrolyser_mw:.0f} MW")

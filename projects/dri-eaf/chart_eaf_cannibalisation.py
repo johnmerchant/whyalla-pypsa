@@ -39,7 +39,7 @@ ax.set_title("Both loads pay well below wholesale\n"
              fontsize=11)
 ax.legend(fontsize=9, loc="upper left")
 ax.grid(alpha=0.3)
-ax.set_xlim(2026, 2040)
+ax.set_xlim(2026, 2042)
 
 # ── Panel [0,1]: Flexibility premium ($/MWh) ────────────────────────────────
 ax = axes[0, 1]
@@ -54,7 +54,7 @@ ax.set_title("Both assets capture a flexibility premium\n"
              fontsize=11)
 ax.legend(fontsize=9, loc="upper left")
 ax.grid(alpha=0.3)
-ax.set_xlim(2026, 2040)
+ax.set_xlim(2026, 2042)
 ax.set_ylim(bottom=0)
 
 # ── Panel [1,0]: Annual electricity consumption split ───────────────────────
@@ -73,7 +73,7 @@ ax.set_title("Combined flexible load grows with electrolyser buildout\n"
              fontsize=11)
 ax.legend(fontsize=9, loc="upper left")
 ax.grid(alpha=0.3)
-ax.set_xlim(2026, 2040)
+ax.set_xlim(2026, 2042)
 
 # ── Panel [1,1]: $/yr flexibility value ─────────────────────────────────────
 ax = axes[1, 1]
@@ -90,7 +90,7 @@ ax.set_title("Combined flexibility value — $M/yr below wholesale\n"
              fontsize=11)
 ax.legend(fontsize=9, loc="upper left")
 ax.grid(alpha=0.3, axis="y")
-ax.set_xlim(2025.4, 2040.6)
+ax.set_xlim(2025.4, 2042.6)
 
 plt.suptitle("Two flexible loads, one cheap-hours market — EAF and electrolyser "
              "co-dispatch at Whyalla",
@@ -106,7 +106,7 @@ print("=" * 95)
 hdr = (f"{'Year':<6}{'Ely MW':>8}{'Ely CF':>8}{'Ely real$':>11}"
        f"{'EAF real$':>11}{'Ely prem':>10}{'EAF prem':>10}{'Wholesale':>11}")
 print(hdr)
-for yr in [2028, 2030, 2032, 2035, 2040]:
+for yr in [2028, 2030, 2033, 2037, 2040, 2041, 2042]:
     if yr in years:
         r = focus.loc[yr]
         print(f"{yr:<6}{r.electrolyser_mw:>8.0f}{r.electrolyser_cf:>8.2f}"
@@ -115,7 +115,7 @@ for yr in [2028, 2030, 2032, 2035, 2040]:
               f"{r.avg_wholesale_price_sa_n:>11.1f}")
 
 print("\nAnnual flexibility value (Policy-stated + gas flat, $M/yr):")
-for yr in [2030, 2035, 2040]:
+for yr in [2030, 2037, 2040, 2042]:
     if yr in years:
         r = focus.loc[yr]
         ely_mwh = r.total_h2_mwh / 0.70

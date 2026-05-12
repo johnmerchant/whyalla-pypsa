@@ -33,6 +33,7 @@ def extract_lcoh_lcos(
     *,
     ng_intensity_mwh_per_t_dri: float = 3.0,
     co2_intensity_kg_per_t_dri: float = 560.0,
+    sa_thermal_emission_factor_t_per_mwh: float = 0.55,
 ) -> dict:
     """Post-process solved network -> {lcoh_per_kg, lcos_per_t_steel, ...}.
 
@@ -106,18 +107,69 @@ def extract_lcoh_lcos(
     )
 
     # ── Gas DRI path (dual-fuel) and emissions ────────────────────────────
-    # total_gas_mwh = MWh_NG consumed at dri_plant_gas.bus0. Emissions scale
-    # linearly with gas throughput: (co2_intensity/ng_intensity) kgCO2/MWh_NG.
+    # total_gas_mwh = MWh consumed at dri_plant_gas.bus0 (fossil NG +
+    # biomethane share, all on the same `ng` bus). Scope-1 emissions count
+    # only the fossil-NG share (biomethane is biogenic, NGER scope-1 zero).
     # Counterfactual = all-gas DRI: annual_steel_t × co2_intensity / 1000.
     if "dri_plant_gas" in network.links.index:
         gas_flow = network.links_t.p0.get("dri_plant_gas", _zero)
         total_gas_mwh = float((gas_flow * snap_w).sum())
     else:
         total_gas_mwh = 0.0
+    # Biomethane share via the dedicated supply generator on `ng`.
+    if "biomethane_supply" in network.generators.index:
+        bm_p = network.generators_t.p.get("biomethane_supply", _zero)
+        total_biomethane_mwh = float((bm_p * snap_w).sum())
+    else:
+        total_biomethane_mwh = 0.0
+    total_fossil_ng_mwh = max(0.0, total_gas_mwh - total_biomethane_mwh)
+
+    # Scrap feed tonnes — sum across the two-tier supply curve (domestic HMS
+    # + premium/imports) since both feed scrap_bus → dri_solid.
+    scrap_t = 0.0
+    for _name in ("scrap_tier1_domestic", "scrap_tier2_premium"):
+        if _name in network.generators.index:
+            _flow = network.generators_t.p.get(_name, _zero)
+            scrap_t += float((_flow * snap_w).sum())
 
     co2_per_mwh_ng_t = co2_intensity_kg_per_t_dri / ng_intensity_mwh_per_t_dri / 1000.0
-    emissions_tCO2 = total_gas_mwh * co2_per_mwh_ng_t
+    emissions_scope1_tCO2 = total_fossil_ng_mwh * co2_per_mwh_ng_t
     counterfactual_tCO2 = annual_steel_t * co2_intensity_kg_per_t_dri / 1000.0
+
+    # ── Scope 2 (market-based, derived ex-post from SA dispatch) ─────────────
+    # Under sa_dispatch the LP endogenously produces an SA thermal dispatch
+    # stack. The grid average CI is
+    #   CI = (total SA thermal MWh × EF) / (total SA generation MWh)
+    # The facility's Scope 2 is net-import × CI. Exports displace SA thermal
+    # at the margin, which the LP already saw via carbon-adjusted SA thermal
+    # marginal cost — here we use average CI for reporting consistency.
+    _imp_p0_raw = network.links_t.p0.get("grid_import", _zero) if "grid_import" in network.links.index else _zero
+    _exp_p1_raw = network.links_t.p1.get("grid_export", _zero) if "grid_export" in network.links.index else _zero
+    total_import_mwh = float((_imp_p0_raw * snap_w).sum())
+    total_export_mwh_delivered = float((-_exp_p1_raw * snap_w).sum())
+
+    # Sum SA thermal + SA VRE dispatch to derive average grid CI.
+    sa_subs = ("CSA", "NSA", "SESA")
+    _gens_t = getattr(network.generators_t, "p", pd.DataFrame())
+    sa_thermal_mwh = 0.0
+    sa_total_gen_mwh = 0.0
+    for sub in sa_subs:
+        for tech in ("thermal", "wind", "solar"):
+            gname = f"{sub}_{tech}"
+            if gname in _gens_t.columns:
+                mwh = float((_gens_t[gname] * snap_w).sum())
+                sa_total_gen_mwh += mwh
+                if tech == "thermal":
+                    sa_thermal_mwh += mwh
+
+    sa_grid_ci_t_per_mwh = (
+        (sa_thermal_mwh * sa_thermal_emission_factor_t_per_mwh) / sa_total_gen_mwh
+        if sa_total_gen_mwh > 0 else 0.0
+    )
+    emissions_scope2_tCO2 = (
+        (total_import_mwh - total_export_mwh_delivered) * sa_grid_ci_t_per_mwh
+    )
+    emissions_tCO2 = emissions_scope1_tCO2 + emissions_scope2_tCO2
     emissions_saved_tCO2 = counterfactual_tCO2 - emissions_tCO2
 
     # H2 fraction on thermal (MWh_LHV) basis at the DRI reductant inlet.
@@ -173,11 +225,22 @@ def extract_lcoh_lcos(
     # objective-basis figure so they agree under rldc_merit.
     _facility_links = [
         "electrolyser", "h2_to_dri", "dri_plant", "dri_plant_gas",
-        "eaf", "battery_charge", "battery_discharge",
+        "eaf", "scrap_to_metallic", "battery_charge", "battery_discharge",
         "grid_import", "grid_export",
+        "electric_heater", "h2_burner",
     ]
-    _facility_gens = ["wind", "solar"]
-    _facility_stores = ["battery_store", "h2_store", "dri_pile", "eaf_campaign"]
+    _facility_gens = [
+        "wind", "solar", "scrap_tier1_domestic", "scrap_tier2_premium",
+        # Gas fuel cost: ng_supply carries the deal-tier price; ng_supply_spot
+        # is added when a Santos-style volume cap is active (above-cap supply
+        # at spot price). biomethane_supply is the third gas-side generator
+        # (zero-carbon biogenic, capped per BIOMETHANE.md). All four must be
+        # summed so the LCOS picks up fuel cost regardless of mix.
+        "ng_supply", "ng_supply_spot", "biomethane_supply",
+    ]
+    _facility_stores = [
+        "battery_store", "h2_store", "dri_pile", "eaf_campaign",
+    ]
 
     # Only sum capex for extendable components — PyPSA excludes fixed-size
     # components from the objective, so including them here would add ghost
@@ -272,10 +335,19 @@ def extract_lcoh_lcos(
         "eaf_realised_price": eaf_realised_price,
         "eaf_flexibility_premium": avg_fac_price - eaf_realised_price,
         "total_gas_mwh": total_gas_mwh,
+        "total_fossil_ng_mwh": total_fossil_ng_mwh,
+        "total_biomethane_mwh": total_biomethane_mwh,
         "h2_fraction": h2_fraction,
+        "scrap_t": scrap_t,
+        "scrap_share": (scrap_t / annual_steel_t) if annual_steel_t > 0 else 0.0,
         "emissions_tCO2": emissions_tCO2,
+        "emissions_scope1_tCO2": emissions_scope1_tCO2,
+        "emissions_scope2_tCO2": emissions_scope2_tCO2,
         "emissions_saved_tCO2": emissions_saved_tCO2,
         "counterfactual_tCO2": counterfactual_tCO2,
+        "total_import_mwh": total_import_mwh,
+        "total_export_mwh_delivered": total_export_mwh_delivered,
+        "sa_grid_ci_t_per_mwh": sa_grid_ci_t_per_mwh,
         "flexibility_premium": avg_fac_price - ely_realised_price,
         "objective": network.objective,
         "lcoh_detail": lc_result,

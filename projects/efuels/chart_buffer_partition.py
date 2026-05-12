@@ -105,12 +105,12 @@ def _solve_one(year: int, min_pu: float) -> dict:
 
 def plot(results: list[dict], min_pus: list[float],
          year: int, outpath: Path) -> None:
-    fig, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(17, 6.5))
+    fig, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(17, 7.0))
     fig.suptitle(
         f"How the plant stores energy between cheap and expensive hours ({year})",
-        fontsize=14, fontweight="bold", y=0.995,
+        fontsize=14, fontweight="bold", y=0.985,
     )
-    fig.text(0.5, 0.955,
+    fig.text(0.5, 0.935,
              "Sensitivity to how much the methanol reactor can turn down "
              "(30% = very flexible, 70% = needs steady throughput)",
              ha="center", fontsize=10, color="dimgrey")
@@ -177,7 +177,7 @@ def plot(results: list[dict], min_pus: list[float],
              va="bottom", ha="right",
              bbox=dict(facecolor="white", edgecolor="lightgrey", alpha=0.8, pad=3))
 
-    plt.tight_layout(rect=[0, 0, 1, 0.94])
+    plt.tight_layout(rect=[0, 0, 1, 0.90])
     plt.savefig(outpath, dpi=150, bbox_inches="tight")
     print(f"Saved {outpath}")
 

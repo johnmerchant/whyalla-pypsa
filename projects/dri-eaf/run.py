@@ -50,7 +50,11 @@ def main(config: FacilityConfig | None = None):
     n = build_facility_network(config)
     attach_grid_price(n, config)
     attach_dri_eaf(n, wacc=config.pypsa_wacc)
-    status, _ = n.optimize(solver_name=config.solver, solver_options=config.solver_options)
+    status, _ = n.optimize(
+        solver_name=config.solver,
+        solver_options=config.solver_options,
+        extra_functionality=getattr(n, "_dri_shaft_constraint", None),
+    )
     if status not in ("ok", "optimal"):
         raise RuntimeError(f"Solve failed: {status}")
     metrics = extract_lcoh_lcos(n, config)

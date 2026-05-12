@@ -8,3 +8,5 @@ dist/
 build/
 .DS_Store
 .dispatch_cache/
+*.lp
+*.pkl

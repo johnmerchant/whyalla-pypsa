@@ -49,12 +49,15 @@ def _solve_year(year: int) -> pypsa.Network:
 
     n = build_facility_network(cfg)
     attach_grid_price(n, cfg)
+    # Mandate scale matches the trajectory's mid-path so the dispatch chart
+    # shows a representative loaded plant (storage is meaningful at scale).
+    mandate_by_year = {2030: 2.5, 2035: 6.8, 2040: 10.2}
     attach_efuels(
         n,
         electrolyser_capex_per_kw=_CAPEX_PATH.get(year, 1000),
         wacc=_WACC,
-        product_split_mode="asf",
-        annual_fuel_mt=0.5,
+        product_split_mode="hydrocracked_ft",
+        annual_fuel_mt=mandate_by_year.get(year, 2.5),
     )
     status, _ = n.optimize(
         solver_name=cfg.solver,
@@ -71,6 +74,13 @@ def _first_week_slice(n: pypsa.Network) -> pd.DatetimeIndex:
 
 
 def _sum_refinery_throughput(n: pypsa.Network, snaps: pd.Index) -> pd.Series:
+    """Refinery is a single multi-output Link (post mass-accounting fix);
+    its p0 is the MeOH input draw."""
+    if "refinery" in n.links.index:
+        return n.links_t.p0.get(
+            "refinery", pd.Series(0.0, index=n.snapshots)
+        ).reindex(snaps).fillna(0.0)
+    # Backwards compatibility for old per-product Links.
     total = pd.Series(0.0, index=snaps)
     for name in n.links.index:
         if name.startswith("refinery_"):
